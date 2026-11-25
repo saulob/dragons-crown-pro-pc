@@ -51,9 +51,15 @@ void dcpgpu_set_controller_rumble(int enabled);
 int dcpgpu_controller_exit_shortcut(void);
 /* 1 while the settings menu is open: the game's pad input should be held neutral. */
 int dcpgpu_overlay_captures_input(void);
+/* Pad button bits for DcpCommsPadIn.pad_buttons and DcpCommsPadOut.hide_pad_buttons (match dcp::comms::kPad*). */
+#define DCP_COMMS_PAD_BACK    (1u << 0)
+#define DCP_COMMS_PAD_L1      (1u << 1)
+#define DCP_COMMS_PAD_R1      (1u << 2)
+#define DCP_COMMS_PAD_DPAD_UP (1u << 3)
+
 /* The Comms Wheel's input, stepped by player 1's pad read: what the pad shows in, what to hide from the game out. `send` is a message id to send now (-1 none). */
 typedef struct {
-    int dpad_up;        /* the gamepad's D-pad Up is held */
+    uint8_t pad_buttons; /* DCP_COMMS_PAD_* held on player 1's gamepad */
     int available;      /* comms_session_available() */
     uint8_t right_x, right_y; /* the sampled right stick, 128 at rest */
     int circle;         /* Circle is held, as the game would see it */
@@ -62,6 +68,7 @@ typedef struct {
 } DcpCommsPadIn;
 typedef struct {
     int hide_dpad_up, hide_cross, hide_circle, neutral_right_stick, neutral_keyboard_axes;
+    uint8_t hide_pad_buttons;
     int send;
 } DcpCommsPadOut;
 void dcpgpu_comms_wheel_step(const DcpCommsPadIn *in, DcpCommsPadOut *out);

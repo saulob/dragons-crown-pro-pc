@@ -1,5 +1,5 @@
 // The sidebar's page icons: the SVGs of assets/launcher/icons compiled into the executable, drawn at the exact pixel
-// size the sidebar asks for.
+// size the sidebar or an icon button asks for.
 #pragma once
 
 #include <cstddef>
@@ -17,11 +17,24 @@ struct PageIconAsset {
     float optical_scale;  // share of the icon box taken by the artwork's longer side
 };
 
+struct FileIconAsset {
+    const char* file;
+    float optical_scale;
+};
+
+inline constexpr FileIconAsset kAppearanceIcon{"appearance.svg", 0.88f};
+inline constexpr FileIconAsset kInventoryIcon{"inventory.svg", 0.88f};
+inline constexpr FileIconAsset kBackIcon{"back.svg", 0.84f};
+inline constexpr FileIconAsset kDownloadIcon{"download.svg", 0.88f};
+inline constexpr FileIconAsset kWifiIcon{"wifi.svg", 0.88f};
+inline constexpr FileIconAsset kAvatarIcon{"avatar.svg", 0.88f};
+
 std::span<const PageIconAsset> PageIconAssets();
 const PageIconAsset* FindPageIcon(PageId page);
 
 // Square RGBA: white, with the artwork as alpha, so one image takes every sidebar colour. Empty on failure.
 std::vector<uint8_t> RasterizeIcon(const uint8_t* svg, size_t size, float optical_scale, int pixels);
+std::vector<uint8_t> RenderFileIcon(const FileIconAsset& asset, int pixels);
 std::vector<uint8_t> RenderPageIcon(PageId page, int pixels);
 
 } // namespace dcp

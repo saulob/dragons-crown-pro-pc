@@ -18,9 +18,12 @@
 #include "skip_intro.h"
 #include "default_message_hook.h"
 #include "gallery_unlock.h"
+#include "item_attack_cap.h"
 #include "appearance_hooks.h"
 #include "appearance_session.h"
+#include "hp_override_hooks.h"
 #include "endgame_unlocks.h"
+#include "character_highlight.h"
 #include "kraken_fix.h"
 #include "skip_offers.h"
 #include "startup_save_hook.h"
@@ -31,6 +34,7 @@
 #include "boss_battle_text.h"
 #include "boss_battle_record.h"
 #include "cyrillic_glyphs.h"
+#include "hangul_glyphs.h"
 #include "latin_glyphs.h"
 #include "system_type_hook.h"
 #include "party_hook.h"
@@ -526,7 +530,7 @@ static int install_cyrillic_glyphs(uint8_t *image, size_t size, const uint8_t *p
 }
 /* A port-side Menu & Subtitles language: its translated message sheets served over the slot's archive. A build whose
  * font lacks the letters gets them in its glyph table; the sheets show Portuguese unaccented when the table cannot be
- * found, and Russian is not served at all. */
+ * found, and Russian and Korean are not served at all. */
 static void install_text_translation(const char *settings_file, const char *image_dir, const char *app0, uint8_t *image, size_t size,
                                      uint64_t entry, uint8_t *message_stubs, size_t message_stub_bytes) {
     char message[1024]="";
@@ -535,22 +539,43 @@ static void install_text_translation(const char *settings_file, const char *imag
     size_t count=0;
     unsigned cyrillic_probe=0;
     const CyrillicCells cyrillic=(CyrillicCells)dcp_text_cyrillic_cells(settings_file,image_dir,app0,&cyrillic_probe);
-    const unsigned probe=cyrillic ? cyrillic_probe : dcp_text_font_probe(settings_file,image_dir,app0);
+    const HangulGlyph *hangul_glyphs=NULL;
+    size_t hangul_count=0;
+    const unsigned hangul=cyrillic ? 0 : dcp_text_hangul_probe(settings_file,image_dir,app0,&hangul_glyphs,&hangul_count);
+    const unsigned probe=cyrillic ? cyrillic_probe : hangul ? hangul : dcp_text_font_probe(settings_file,image_dir,app0);
     const uint8_t *glyph_pages=probe ? font_glyph_pages(image,size,(uint16_t)probe) : NULL;
     const uint8_t *glyph_page=font_glyph_page(image,size,glyph_pages,0);
-    const int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic) : latin_glyphs_fit(image,size,glyph_page);
-    int glyphs_composed=0;
+    /* The Hangul cells are checked here, before anything is served: a table that cannot hold them leaves Korean native. */
+    const int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic)
+                             : hangul ? hangul_glyphs_fit(image,size,glyph_pages,hangul_glyphs,hangul_count)
+                                      : latin_glyphs_fit(image,size,glyph_page);
+    int glyphs_composed=0, served=0;
     const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message),
                                              glyph_table,&glyphs_composed);
     if (archive) {
-        if (!overlay_archive(archive,length,patches,count))
-            snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid)",archive);
-        else {
-            if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
-                printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
-            if (glyphs_composed && !cyrillic && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
-            default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
+        int hangul_installed=1;
+        if (glyphs_composed && hangul &&
+            !hangul_glyphs_install(image,size,glyph_pages,hangul_glyphs,hangul_count)) {
+            hangul_installed=0;
+            snprintf(message,sizeof(message),"Korean unavailable (the Hangul syllables could not be added to its glyph table), showing English");
         }
+        if (hangul_installed) {
+            if (!overlay_archive(archive,length,patches,count))
+                snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid)",archive);
+            else {
+                served=!hangul || glyphs_composed;
+                if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
+                    printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
+                if (glyphs_composed && hangul) runtime_font_set_korean(1);
+                if (glyphs_composed && !cyrillic && !hangul && latin_glyphs_install(image,size,glyph_page)) share_composed_glyphs();
+                default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
+            }
+        }
+    }
+    /* The port's own lines are drawn with the same letters: without the translation they are English like the sheets. */
+    if ((hangul || cyrillic) && !served) {
+        boss_battle_text_set_language("english",0);
+        comms_text_set_language("english",0);
     }
     const char *stage=dcp_text_stage_overlay(&length,&patches,&count);
     if (stage && !overlay_archive(stage,length,patches,count))
@@ -627,6 +652,29 @@ static void install_custom_appearance(const char *image_dir, const char *app0, c
     }
     printf("Appearance runtime: %zu custom character(s)\n",instance_count);
 }
+static void install_character_overrides(const char *build_key, const char *image_dir, const char *user_dir,
+                                        uint8_t *image, uint64_t size, uint64_t entry, uint64_t player_update,
+                                        uint8_t *stubs, size_t stubs_size) {
+    char message[1024]="";
+    const CharacterOverrideEntry *entries=NULL;
+    const size_t count=dcp_character_overrides(image_dir,user_dir,&entries,message,sizeof(message));
+    if (*message) printf("Character override: %s\n",message);
+    if (!count || !entries) return;
+    printf("Character stat overrides: loaded %zu custom character(s)\n",count);
+    CharacterOverrideSites sites;
+    if (!stubs_size || !player_update || !character_override_hooks_locate(image,size,&sites)) {
+        printf("Character override unavailable for %s: stat recalculation sites not found\n",
+               build_key && *build_key ? build_key : "unknown");
+        return;
+    }
+    sites.player_update=player_update;
+    character_override_hooks_set_entries(entries,count);
+    if (!character_override_hooks_install(image,size,entry,&sites,stubs,stubs_size)) {
+        character_override_hooks_set_entries(NULL,0);
+        printf("Character override unavailable for %s: hook installation failed\n",
+               build_key && *build_key ? build_key : "unknown");
+    }
+}
 static const char *command_line(int argc, char **argv) {
 #ifdef _WIN32
     (void)argc; (void)argv;
@@ -638,6 +686,11 @@ static const char *command_line(int argc, char **argv) {
         used+=(size_t)snprintf(line+used,sizeof(line)-used,"%s%s",i ? " " : "",argv[i]);
     return line;
 #endif
+}
+static uint32_t highlight_look(int slot, uint64_t record, int klass, int color, int owner) {
+    if (owner==1) return dcp_remote_appearance_of(slot,klass,color) ? CHARACTER_HIGHLIGHT_REMOTE_CUSTOM : CHARACTER_HIGHLIGHT_NATIVE_LOOK;
+    const AppearanceInstance *instance=appearance_instance_of_record(record,klass,color);
+    return instance && instance->entry[0] ? character_highlight_custom_key(instance->entry) : CHARACTER_HIGHLIGHT_NATIVE_LOOK;
 }
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -810,7 +863,18 @@ int main(int argc, char **argv) {
     runtime_pad_set_settings(settings_file);
     runtime_pad_set_rumble(dcp_controller_rumble(settings_file));
     runtime_cheats_set_slot_human(runtime_cheat_seat_human);
-    if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);
+    {
+        char atlas_table[4200];
+        snprintf(atlas_table,sizeof(atlas_table),"%s/atlas-signatures.txt",paths.image_dir);
+        character_highlight_set_look_resolver(highlight_look);
+        if (character_highlight_load_table(atlas_table)<=0 && known_build && !check_imports) {
+            char error[256];
+            if (dcp_build_atlas_signatures(app0,paths.image_dir,error,sizeof(error))) character_highlight_load_table(atlas_table);
+            else printf("Character Highlight: %s\n",error);
+        }
+        character_highlight_set_forward(discord_presence ? party_hook_observe_unit : NULL);
+        runtime_cheats_set_player_observer(character_highlight_observe_unit);
+    }
     runtime_cheats_set_online(runtime_online_play_enabled());
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file), dcp_saved_damage_taken(settings_file),
@@ -980,7 +1044,9 @@ int main(int argc, char **argv) {
                                        kraken_fix_stub_area;
     const size_t appearance_stub_area = known_build ? appearance_hooks_stub_bytes() : 0;
     const size_t comms_stub_area = known_build && runtime_online_active() ? comms_bridge_stub_bytes() : 0;
-    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area + comms_stub_area);
+    const size_t character_override_stub_area = known_build ? character_override_hooks_stub_bytes() : 0;
+    const size_t hook_bytes = round_page(message_stub_offset + default_message_stub_bytes() + appearance_stub_area +
+                                         comms_stub_area + character_override_stub_area);
     const size_t ultrawide_bytes = ultrawide_wanted ? page_size : 0;
     /* the hook stubs and the widened extents follow the image, within a jump and a rip displacement of it */
     image = allocate(round_page(size) + hook_bytes + ultrawide_bytes);
@@ -1084,7 +1150,7 @@ int main(int argc, char **argv) {
         dcp_resolve_features(known_build ? &game_build : NULL,&view,runtime_cheats_hooks_wanted(1),ultrawide_wanted,&located);
         if (known_build && voice_language!=DCP_VOICE_DEFAULT)
             voice_located=dcp_resolve_voice_language(&game_build,&view,&voice_sites,voice_failure,sizeof(voice_failure));
-        if (known_build && runtime_online_active()) {
+        if (known_build) {
             party_located=dcp_resolve_party(&game_build,&view,&party_sites,party_failure,sizeof(party_failure));
         }
         if (known_build)
@@ -1176,11 +1242,12 @@ int main(int argc, char **argv) {
         system_type_hook_install(image,size,entry,image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes,
                                  system_type_stub_bytes,runtime_online_system_type);
     if (known_build && runtime_online_active() && !runtime_cheats_hooks_wanted(1)) {
-        if (party_located)
-            party_hook_install_located(image,size,entry,&party_sites,
-                                       image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes,
-                                       party_stub_bytes);
-        else printf("Party: not reported, %s\n",party_failure);
+        if (party_located) {
+            if (party_hook_install_located(image,size,entry,&party_sites,
+                                           image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes,
+                                           party_stub_bytes))
+                party_hook_add_unit_listener(character_highlight_observe_local_unit);
+        } else printf("Party: not reported, %s\n",party_failure);
     }
     const int skip_intro_applied=skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,
                                                     image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes,
@@ -1189,6 +1256,7 @@ int main(int argc, char **argv) {
                                                             gallery_unlock_requested,
                                                             image+round_page(size)+cheat_stub_bytes+save_stub_bytes+voice_stub_bytes+system_type_stub_bytes+ultrawide_stub_bytes+lzcnt_stub_bytes+party_stub_bytes+exit_game_stub_bytes+skip_intro_stub_area,
                                                             gallery_unlock_stub_area);
+    item_attack_cap_install(image,size,known_build ? build_key : NULL);
     const int japanese_menu_buttons=menu_buttons_wanted(dcp_japanese_menu_buttons(settings_file));
     const int menu_buttons_applied=menu_buttons_install(image,size,known_build ? build_key : NULL,japanese_menu_buttons);
     exit_game_set_accept_east(japanese_menu_buttons && menu_buttons_applied);
@@ -1238,7 +1306,13 @@ int main(int argc, char **argv) {
         if (!party_located) printf("Comms Wheel: not active, the player unit tick was not located\n");
         else if (!comms_bridge_locate(image,size,&comms_sites)) printf("Comms Wheel: not active, the greeting balloon was not located\n");
         else if (comms_bridge_install(image,size,entry,&comms_sites,image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area,comms_stub_area))
-            party_hook_set_unit_listener(comms_bridge_unit_tick);
+            party_hook_add_unit_listener(comms_bridge_unit_tick);
+    }
+    if (character_override_stub_area) {
+        install_character_overrides(build_key,paths.image_dir,user_dir ? user_dir : "user",image,size,entry,
+                                    party_located ? party_sites.tick : 0,
+                                    image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area+comms_stub_area,
+                                    character_override_stub_area);
     }
     const DcpRunSettings run_settings={known_build ? game_build.label : NULL,runtime_online_play_enabled(),
                                        render_target.width,render_target.height,render_resolution->key,aspect_ratio->name,

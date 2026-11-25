@@ -71,7 +71,11 @@ struct Values {
     std::atomic<int> frame_rate{60};
     // Port hotkeys as SDL scancodes (dcp_keys.h): the Cheats menu, the window mode switch, the Comms Wheel and Exit Game.
     std::atomic<int> menu_key{SDL_SCANCODE_F10}, window_mode_key{SDL_SCANCODE_F11}, comms_key{SDL_SCANCODE_T},
-        exit_key{SDL_SCANCODE_F9};
+        exit_key{SDL_SCANCODE_F9}, character_highlight_key{SDL_SCANCODE_F7};
+    // Character Highlight: the controller chord (character_highlight_core.h kChords); the on/off state is per player and never saved.
+    std::atomic<int> character_highlight_chord{0};
+    // Comms Wheel controller shortcut (dcp_comms.h kControllerShortcuts); default is View / Back + D-pad Up.
+    std::atomic<int> comms_wheel_chord{0};
     // Whether L1 + R1 + Options held for two seconds closes the game (src/dcp_exit_shortcut.h); read at start.
     std::atomic<bool> controller_exit_shortcut{true};
 };

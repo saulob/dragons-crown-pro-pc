@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
+import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from '../src/admin_page.js';
 import { metricsDay } from '../src/metrics.js';
 import { ROOM, makeLobby } from './harness.js';
 
@@ -512,4 +512,80 @@ test('equal Comms Wheel counts keep message order and the first of them is the m
   const page = await dashboard(env, 30);
   assert.deepEqual(commsCards(page), ['Total Uses10', 'Most UsedThanks · 5 uses · 50.0%']);
   assert.deepEqual(commsRows(page).slice(0, 3), [['Thanks', '5', '50.0%'], ['Ready', '5', '50.0%'], ['Hello', '0', '0.0%']]);
+});
+
+const putDimension = (env, dimension, value, count, n = 0) =>
+  env.host.sql.run(`INSERT INTO metrics_daily_dimensions VALUES (?, ?, ?, ?)`, dayAgo(env, n), dimension, value, count);
+
+test('Difficulty in multiplayer rooms follows the platform section and sits before Comms Wheel Usage', () => {
+  const platforms = ADMIN_HTML.indexOf('<h2>Platforms in multiplayer rooms</h2>');
+  const mix = ADMIN_HTML.indexOf('id="d-mix"');
+  const title = ADMIN_HTML.indexOf('<h2 class="sub">Difficulty in multiplayer rooms</h2>');
+  const difficulty = ADMIN_HTML.indexOf('id="d-difficulty"');
+  const comms = ADMIN_HTML.indexOf('Comms Wheel Usage');
+  assert.equal(ADMIN_HTML.split('Difficulty in multiplayer rooms').length - 1, 1);
+  assert.ok(ADMIN_HTML.includes('<h2 class="sub">Difficulty in multiplayer rooms</h2>') && ADMIN_CSS.includes('h2.sub { margin-top: 24px; }'));
+  assert.ok(platforms > 0 && platforms < mix && mix < title && title < difficulty && difficulty < comms);
+});
+
+test('the difficulty section with no data says so, adds no bars and shows no NaN', async () => {
+  const env = makeLobby();
+  const page = await dashboard(env, 30);
+  const box = page.get('d-difficulty');
+  assert.ok(box.textContent.includes('No data yet'));
+  assert.equal(box.find((n) => n.hasClass('fill')).length, 0);
+  assert.ok(page.get('difficulty-note').textContent.startsWith('Last 30 days'));
+  assert.ok(!page.get('difficulty-note').textContent.includes('No data yet'));
+  assert.equal(page.get('difficulty-unknown').textContent, '');
+  assert.equal(page.get('d-difficulty').textContent.split('No data yet').length - 1, 1);
+  assert.equal(page.get('d-difficulty').find((n) => n.tag === 'h3').length, 1);
+  assert.ok(!/NaN|Infinity|undefined|\[object/.test(everyText(page)));
+});
+
+test('the difficulty section shows the four rows with bars, counts and percentages of the known rooms', async () => {
+  const env = makeLobby();
+  putDay(env, 0, { rooms_closed: 20, rooms_with_guest: 12, party_total: 40 });
+  for (const [value, count] of [['normal', 5], ['hard', 3], ['infernal', 1], ['ultimate', 1]]) putDimension(env, 'difficulty', value, count);
+  const page = await dashboard(env, 30);
+  const rows = page.get('d-difficulty').find((n) => n.hasClass('row'));
+  assert.deepEqual(rows.map((r) => r.find((n) => n.hasClass('name'))[0].textContent), ['Normal', 'Hard', 'Infernal', 'Ultimate']);
+  assert.deepEqual(rows.map((r) => r.find((n) => n.hasClass('count'))[0].textContent), ['5 · 50%', '3 · 30%', '1 · 10%', '1 · 10%']);
+  assert.deepEqual(rows.map((r) => Math.round(parseFloat(r.find((n) => n.hasClass('fill'))[0].style.width))), [100, 60, 20, 20]);
+  const note = page.get('difficulty-note').textContent + page.get('difficulty-unknown').textContent;
+  assert.ok(note.includes('Last 30 days, multiplayer rooms that ended and reported the host character difficulty (10)'));
+  assert.ok(note.includes('Unknown: 2 of 12 multiplayer rooms did not report a difficulty.'));
+  assert.ok(!/NaN|Infinity|undefined/.test(everyText(page)));
+});
+
+test('rooms without a reported difficulty stay out of the percentages and are counted as unknown', async () => {
+  const env = makeLobby();
+  putDay(env, 0, { rooms_closed: 9, rooms_with_guest: 9, party_total: 18 });
+  putDimension(env, 'difficulty', 'hard', 1);
+  putDimension(env, 'difficulty', 'ultimate', 3);
+  const page = await dashboard(env, 30);
+  const counts = page.get('d-difficulty').find((n) => n.hasClass('row'))
+    .map((r) => r.find((n) => n.hasClass('count'))[0].textContent);
+  assert.deepEqual(counts, ['0 · 0%', '1 · 25%', '0 · 0%', '3 · 75%']);
+  assert.ok(page.get('difficulty-unknown').textContent.includes('Unknown: 5 of 9'));
+});
+
+test('difficulty older than the selected period is left out, and platform and room sections are unaffected by it', async () => {
+  const env = makeLobby();
+  putDay(env, 0, { rooms_closed: 4, rooms_with_guest: 4, party_total: 8, rooms_cross_platform: 1, rooms_android: 1 });
+  putDimension(env, 'platform_mix', 'Windows+Android', 3);
+  putDimension(env, 'platform_mix', 'Windows', 1);
+  putDimension(env, 'difficulty', 'normal', 2);
+  putDimension(env, 'difficulty', 'infernal', 50, 40);
+  const page = await dashboard(env, 30);
+  const counts = page.get('d-difficulty').find((n) => n.hasClass('row')).map((r) => r.find((n) => n.hasClass('count'))[0].textContent);
+  assert.deepEqual(counts, ['2 · 100%', '0 · 0%', '0 · 0%', '0 · 0%']);
+  const withoutDifficulty = makeLobby();
+  putDay(withoutDifficulty, 0, { rooms_closed: 4, rooms_with_guest: 4, party_total: 8, rooms_cross_platform: 1, rooms_android: 1 });
+  putDimension(withoutDifficulty, 'platform_mix', 'Windows+Android', 3);
+  putDimension(withoutDifficulty, 'platform_mix', 'Windows', 1);
+  const plain = await dashboard(withoutDifficulty, 30);
+  for (const id of ['d-mix', 'platform-note', 'platform-cards', 'activity', 'd-occupancy', 'd-lifetime']) {
+    assert.equal(page.get(id).textContent, plain.get(id).textContent, id);
+  }
+  assert.ok(page.get('d-mix').textContent.includes('Windows + Android'));
 });

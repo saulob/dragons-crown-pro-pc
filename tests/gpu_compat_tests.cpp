@@ -143,6 +143,65 @@ void TestMixedSamplesFallback() {
     CHECK(!ForceColorSamplesToDepth(Amd(), false, true));
 }
 
+void TestMixedSamplesPNextPolicy() {
+    const auto amd_route = ChoosePipelineState(Amd());
+    const auto nvidia_route = ChoosePipelineState(ModernNvidia());
+    const auto adreno_route = ChoosePipelineState(Adreno());
+
+    const std::uint32_t single_1x[1] = {1};
+    const std::uint32_t dual_1x[2] = {1, 1};
+    const std::uint32_t dual_4x[2] = {4, 4};
+    const std::uint32_t mixed_1x_4x[2] = {1, 4};
+
+    // Uniform 1x attachments omit VkAttachmentSampleCountInfoAMD.
+    CHECK(!NeedsMixedSamplesInfo(amd_route, 1, single_1x, 1, true, 1));
+    CHECK(!NeedsMixedSamplesInfo(amd_route, 1, dual_1x, 2, false, 1));
+    CHECK(!NeedsMixedSamplesInfo(nvidia_route, 1, single_1x, 1, true, 1));
+
+    // Uniform multisample attachments (color == depth == raster) omit pNext.
+    CHECK(!NeedsMixedSamplesInfo(amd_route, 4, dual_4x, 2, true, 4));
+    CHECK(!NeedsMixedSamplesInfo(amd_route, 4, dual_4x, 2, false, 1));
+    CHECK(!NeedsMixedSamplesInfo(nvidia_route, 4, dual_4x, 2, true, 4));
+
+    // Depth-only pass with matching rasterization samples omits pNext.
+    CHECK(!NeedsMixedSamplesInfo(amd_route, 4, nullptr, 0, true, 4));
+    CHECK(!NeedsMixedSamplesInfo(amd_route, 1, nullptr, 0, false, 1));
+
+    // Genuine color/depth sample count difference requires pNext on AMD and NVIDIA.
+    CHECK(NeedsMixedSamplesInfo(amd_route, 4, single_1x, 1, true, 4));
+    CHECK(NeedsMixedSamplesInfo(amd_route, 4, dual_4x, 2, true, 1));
+    CHECK(NeedsMixedSamplesInfo(amd_route, 4, mixed_1x_4x, 2, true, 4));
+    CHECK(NeedsMixedSamplesInfo(nvidia_route, 4, single_1x, 1, true, 4));
+
+    // Without capability, pNext is never attached and fallback forcing remains intact.
+    CHECK(!NeedsMixedSamplesInfo(adreno_route, 4, single_1x, 1, true, 4));
+    CHECK(!NeedsMixedSamplesInfo(adreno_route, 4, mixed_1x_4x, 2, true, 4));
+
+    // NVIDIA forces differing color samples to depth before pipeline creation, resulting in uniform samples.
+    CHECK(ForceColorSamplesToDepth(ModernNvidia(), false, false));
+    CHECK(!NeedsMixedSamplesInfo(nvidia_route, 4, dual_4x, 2, true, 4));
+}
+
+// DCP-TKXB2V: Linux SteamOS, AMD Ryzen Z2 Go (RADV REMBRANDT), Gamescope, Vulkan with
+// VK_AMD_mixed_attachment_samples and Steam Fossilize (which rejects sType 1000044008).
+void TestDcpTkxb2vRegression() {
+    const Capabilities radv_rembrandt = Amd();
+    const auto route = ChoosePipelineState(radv_rembrandt);
+    CHECK(route.mixed_samples_info);
+
+    const std::uint32_t uniform_1x[2] = {1, 1};
+    const std::uint32_t uniform_4x[1] = {4};
+    const std::uint32_t mixed_color_depth[1] = {1};
+
+    // Standard gameplay pipelines avoid attaching sType 1000044008 so Fossilize can record them.
+    CHECK(!NeedsMixedSamplesInfo(route, 1, uniform_1x, 1, true, 1));
+    CHECK(!NeedsMixedSamplesInfo(route, 1, uniform_1x, 2, false, 1));
+    CHECK(!NeedsMixedSamplesInfo(route, 4, uniform_4x, 1, true, 4));
+
+    // Genuinely mixed-sample pipelines preserve VK_AMD_mixed_attachment_samples on RADV.
+    CHECK(NeedsMixedSamplesInfo(route, 4, mixed_color_depth, 1, true, 4));
+}
+
 void TestSummary() {
     const std::string adreno = Summary(Adreno());
     CHECK(adreno == "GPU compatibility: vendor=0x5143 interpolation=fallback manual_interpolation=off integer_fix=on "
@@ -248,7 +307,8 @@ void TestRendererUsesRoutes() {
     CHECK(Contains(pipeline, ".pDepthStencilState = state_route.static_depth_stencil_state ? &depth_stencil_info : nullptr"));
     CHECK(Contains(pipeline, "state_route.dynamic_color_write_mask\n                    ? vk::ColorComponentFlagBits::eR"));
     CHECK(Contains(pipeline, "if (!state_route.provoking_vertex_state) {\n        raster_chain.unlink<vk::PipelineRasterizationProvokingVertexStateCreateInfoEXT>();"));
-    CHECK(Contains(pipeline, ".pNext = state_route.mixed_samples_info ? &mixed_samples : nullptr"));
+    CHECK(Contains(pipeline, "GpuCompat::NeedsMixedSamplesInfo(\n        state_route,"));
+    CHECK(Contains(pipeline, ".pNext = attach_mixed_samples ? &mixed_samples : nullptr"));
 
     const std::string instance = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp");
     CHECK(Contains(instance, "feature_chain.get<vk::PhysicalDeviceProvokingVertexFeaturesEXT>().provokingVertexLast &&\n        add_extension(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME)"));
@@ -270,7 +330,8 @@ void TestShaderPaths() {
     const std::string translate = ReadSource("gpu/shadps4/shader_recompiler/frontend/translate/translate.cpp");
     CHECK(Contains(translate, "if (profile.supports_amd_shader_explicit_vertex_parameter ||\n                    profile.supports_fragment_shader_barycentric) {\n                    ir.SetVectorReg(IR::VectorReg(vreg), ir.GetAttribute(attrib, comp));"));
     const std::string vintrp = ReadSource("gpu/shadps4/shader_recompiler/frontend/translate/vector_interpolation.cpp");
-    CHECK(Contains(vintrp, "if (!profile.needs_manual_interpolation) {\n        interp = GetInterpolation(vgpr_to_interp[inst.src[0].code]);\n        SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));"));
+    CHECK(Contains(vintrp, "const auto next = GetInterpolation(vgpr_to_interp[inst.src[0].code]);"));
+    CHECK(Contains(vintrp, "SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));"));
     CHECK(Contains(vintrp, "interp.primary = Qualifier::Flat;"));
 
     const std::string emit = ReadSource("gpu/shadps4/shader_recompiler/backend/spirv/emit_spirv_context_get_set.cpp");
@@ -279,6 +340,8 @@ void TestShaderPaths() {
     const std::string serialization =
         ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_serialization.cpp");
     CHECK(Contains(serialization, "ShaderBinaryVersion = 8u;"));
+    CHECK(Contains(serialization, "ShaderMetaVersion = 8u;"));
+    CHECK(Contains(serialization, "PipelineKeyVersion = 6u;"));
 }
 
 } // namespace
@@ -289,6 +352,8 @@ int main() {
     TestNoVendorGate();
     TestAdrenoPipelineState();
     TestMixedSamplesFallback();
+    TestMixedSamplesPNextPolicy();
+    TestDcpTkxb2vRegression();
     TestSummary();
     TestIntegerInterpolation();
     TestPullModelReconstruction();

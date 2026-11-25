@@ -405,6 +405,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         DcpPresent::GamescopeSession()) {
         std::printf("Presenter diagnostic: first VideoOut image %ux%u\n", image_size.width, image_size.height);
     }
+    DcpPresent::RecordVideoOut();
 
     // SMAA, FSR 1, RCAS and its strength follow the settings every frame.
     const auto& graphics = DcpSettings::Get();
@@ -843,6 +844,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         presented = swapchain.Present();
     }
     if (presented) {
+        DcpPresent::RecordPresent();
         if (gate.Presented()) {
             DcpPresent::g_progress.lifecycle = static_cast<int>(gate.Current());
             std::printf("Swapchain lifecycle: presenting resumed\n");

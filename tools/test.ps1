@@ -1,9 +1,12 @@
 <#
 .SYNOPSIS
-  Builds and runs the focused headless tests, and prints the supported-build parity summary. It is the gate to pass before
+  Builds and runs the current development focus; with -Full, every suite and the supported-build parity summary, the gate to pass before
   committing parity work: no window, no game launch, no production network (a development lobby on loopback at most).
 .PARAMETER SkipLinux
-  Does not run the Linux network tests through WSL.
+  Does not run the Linux tests through WSL.
+.PARAMETER Full
+  Runs the complete release and parity test matrix across all registered suites (for CODE REVIEW FINAL). Without -Full or a
+  specific focused switch, tools\test.ps1 runs only the current default development focus.
 .PARAMETER BossBattleOnline
   Builds and runs only the Boss Battle Online focused suites (visitor lifecycle, handoff, Early Story handoff, Boss Battle Online, Boss Battle, Boss
   Battle menu, Early Story, feature locators, build parity) and reports their result alone.
@@ -28,6 +31,15 @@
   overlay suite and the online appearance suite) and, through WSL, the same groups on Linux (tools/build.sh --editor, which
   builds only those test targets, never the game), then prints the Windows/Linux Editor parity. The normal run includes the
   same groups on both platforms.
+.PARAMETER SavePage
+  Builds and runs only the Save page tests (dcp-save-page-tests: discovery and overview, DATA slots, backups, export, import,
+  restore, the Editor invalidation contract and the page's source routing, on synthetic saves) and the quick groups of
+  dcp-save-editor-tests, and reports their result alone. No game, no window, no file chooser. The normal run includes both.
+.PARAMETER InventoryEditor
+  Builds and runs only the Inventory Editor tests (dcp-inventory-editor-tests: item records, catalog, edits and their safety
+  checks, Apply / Discard, navigation, page structure and Portuguese text, on synthetic saves and read-only copies of local
+  saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
+  The normal run includes both.
 .DESCRIPTION
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -70,7 +82,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease)
+param([switch]$SkipLinux, [switch]$Full, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
 
 . (Join-Path $PSScriptRoot '_common.ps1')
 . (Join-Path $PSScriptRoot '_progress.ps1')
@@ -292,6 +304,59 @@ function Invoke-LinuxLauncherSyntax {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-launcher.sh", $root) $true
 }
 
+function Find-ImagingPython {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($cmd in @(Get-Command python -All -ErrorAction SilentlyContinue)) {
+        if ($cmd.Source -and -not $candidates.Contains($cmd.Source)) { $candidates.Add($cmd.Source) }
+    }
+    $pyRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    if (Test-Path -LiteralPath $pyRoot) {
+        foreach ($exe in @(Get-ChildItem -LiteralPath $pyRoot -Filter python.exe -Recurse -Depth 2 -ErrorAction SilentlyContinue)) {
+            if (-not $candidates.Contains($exe.FullName)) { $candidates.Add($exe.FullName) }
+        }
+    }
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        foreach ($exe in $candidates) {
+            & $exe -c "import numpy, PIL" *> $null
+            if ($LASTEXITCODE -eq 0) { return $exe }
+        }
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
+    return $null
+}
+
+function Invoke-PtBrManualVisualChecks {
+    $py = Find-ImagingPython
+    if (-not $py) { return Skipped 'no Python with numpy and Pillow is installed' }
+    $out = New-Object System.Collections.Generic.List[string]
+    $checks = @(
+        @((Join-Path $script:RepoRoot 'scripts\localization\visual_assets.py'), 'validate', '--manuals-only'),
+        @((Join-Path $script:RepoRoot 'scripts\localization\manual_repairs.py'), 'check')
+    )
+    foreach ($checkArgs in $checks) {
+        $r = Invoke-Native $py $checkArgs $true $script:RepoRoot
+        foreach ($line in @($r.Lines) + @($r.Hidden)) { $out.Add($line) }
+        if ($r.Code -ne 0) { return @{ Code = $r.Code; Lines = @($out); Hidden = @(); Skip = '' } }
+    }
+    @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
+}
+
+function Invoke-PtBrLocalizationChecks {
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { return Skipped 'python is not installed' }
+    $script = Join-Path $script:RepoRoot 'scripts\localization\ptbr.py'
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($cmd in @('selftest', 'validate', 'parity')) {
+        $r = Invoke-Native $py.Source @($script, $cmd) $true $script:RepoRoot
+        foreach ($line in @($r.Lines) + @($r.Hidden)) { $out.Add($line) }
+        if ($r.Code -ne 0) { return @{ Code = $r.Code; Lines = @($out); Hidden = @(); Skip = '' } }
+    }
+    @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
+}
+
 function Invoke-LinuxEditorGate {
     if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
@@ -355,9 +420,10 @@ function Invoke-Native([string]$File, [string[]]$Arguments = @(), [bool]$Quiet =
 }
 
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
-                  'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-endgame-unlocks-tests',
+                  'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-character-highlight-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-endgame-unlocks-tests', 'dcp-thread-lifecycle-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
-                  'dcp-launcher-tests', 'dcp-save-editor-tests'
+                  'dcp-launcher-tests', 'dcp-korean-localization-tests', 'dcp-issue84-tests', 'dcp-item-attack-cap-tests',
+                  'dcp-save-editor-tests', 'dcp-save-page-tests', 'dcp-inventory-editor-tests', 'dcp-character-override-tests'
 $requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
                   'CUSA10209 1.00 Asia/Hong Kong'
 $blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
@@ -367,6 +433,8 @@ $tests = @(
     (Test-Step 'launcher tests (profiles, install, update archives, languages, prompts, settings, and the launcher UI groups: icons, licenses, header art, DPI layout, scrollbar gutter, separators, sidebar, navigation, renderer)' 'dcp-launcher-tests' -Parity -Capture),
     (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
         -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' }))),
+    (Test-Step 'PT-BR localization checks (ptbr.py selftest, validate, parity)' -Block { Invoke-PtBrLocalizationChecks } -Capture),
+    (Test-Step 'PT-BR manual visual checks (visual_assets.py validate --manuals-only, manual_repairs.py check)' -Block { Invoke-PtBrManualVisualChecks } -Capture),
     (Test-Step 'unsupported-build diagnostics tests (direct package analysis, one-shot report, loader validators, edge cases)' 'dcp-build-diagnostics-tests' -Parity),
     (Test-Step 'build feature parity tests (contract, update parity, mappings, unknown builds)' 'dcp-build-parity-tests' -Parity -Capture),
     (Test-Step 'feature locator tests (Cheats, Voice Language, True Ultrawide: real and relocated images, synthetic images, known builds only)' 'dcp-feature-sites-tests' -Parity),
@@ -379,6 +447,7 @@ $tests = @(
     (Test-Step 'Voice language tests (issue #69: player, resurrected characters, narrator, NPCs, enemies, allies, all builds; narrator off alone)' 'dcp-voice-tests' -Parity),
     (Test-Step 'online System type hook tests' 'dcp-system-type-tests' -Parity),
     (Test-Step 'online party snapshot tests' 'dcp-party-tests' -Parity),
+    (Test-Step 'DCP-YYM3TL online Inn report-adventurers lifecycle (detached ally loader: cancel waits for the worker before its owner is freed)' 'dcp-thread-lifecycle-tests'),
     (Test-Step 'Comms Wheel tests (message ids, radial layout, hold input, wire body, limits, every language, usage counts, balloon bridge on synthetic and local boot images)' 'dcp-comms-tests' -Parity),
     (Test-Step 'Comms Wheel session tests (rules, telemetry batching, the real send entry point)' 'dcp-comms-session-tests'),
     (Test-Step 'Comms Wheel production send tests (one accepted send, one count)' 'dcp-comms-session-runtime-tests'),
@@ -402,6 +471,7 @@ $tests = @(
     (Test-Step 'AMD water workaround tests (vendor defaults, no hotkey)' 'dcp-amd-water-tests'),
     (Test-Step 'pipeline cache tests (seal, identity, warm-up mode, recovery, build gate)' 'dcp-pipeline-cache-tests'),
     (Test-Step 'GPU compatibility tests (interpolation route, integer fix, dynamic state, feedback loop, mixed samples)' 'dcp-gpu-compat-tests'),
+    (Test-Step 'Issue #84 Adreno regression tests (feedback snapshot fallback, provoking pass break, static pipeline key audit, cache invalidation, diagnostics)' 'dcp-issue84-tests'),
     (Test-Step 'water diagnostics tests (AMD only, deduplication, cap)' 'dcp-water-diag-tests'),
     (Test-Step 'narrow water reader tests (16:10 skip, 16:9 and ultrawide untouched, signature)' 'dcp-narrow-water-reader-tests'),
     (Test-Step 'save-data tests (mounts, Japanese startup save hook)' 'dcp-savedata-tests' -Parity),
@@ -409,6 +479,9 @@ $tests = @(
     (Test-Step 'online appearance tests (recipe, room session, remote textures, seat-aware hooks)' 'dcp-appearance-online-tests' -Capture -Quiet),
     (Test-Step 'Character Editor release groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model, composition with the translation overlay, real archives)' 'dcp-save-editor-tests' -Parity -Capture -Quiet `
         -Key 'dcp-save-editor-tests release' -Arguments @('release')),
+    (Test-Step 'Save page tests (overview, DATA slots, backups, export, import, restore, PS3/Vita detection, Editor invalidation, page routing)' 'dcp-save-page-tests'),
+    (Test-Step 'Inventory Editor tests (item records, catalog, edits, safety, Apply and Discard, navigation, page structure, Portuguese text)' 'dcp-inventory-editor-tests'),
+    (Test-Step 'F3K8S Character stat override tests (per-field Apply semantics, STR/CON/DEX/INT/MGR/LUC live and status overrides, native fallback for untouched stats, Max HP and anti-Infinite-Health regressions, identity/multiplayer isolation, sidecar compatibility, native CUSA10454 1.00 and CUSA10209 1.00 paths)' 'dcp-character-override-tests'),
     (Test-Step 'test progress reporter tests (percentage, bar, ETA, check counts, timing table, redirected output, injected clock)' 'dcp-test-progress-tests'),
     (Test-Step 'test progress runner tests (tools\_progress.ps1 on synthetic time: bar, percentage, ETA, spinner line, redirected output, timing)' -Script 'tests\progress_script_tests.ps1' -Capture),
     (Test-Step 'tiling tests (GPU tile layouts and addresses)' 'dcp-tiling-tests'),
@@ -421,7 +494,9 @@ $tests = @(
     (Test-Step 'updater helper tests' 'dcp-update-helper-tests'),
     (Test-Step 'RTC tests (Win32 file time)' 'dcp-rtc-tests'),
     (Test-Step 'Skip Offer tests (synthetic and local boot images)' 'dcp-skip-offers-tests' -Parity),
+    (Test-Step 'Item Attack Cap tests (weapon clamp patch: synthetic and local boot images)' 'dcp-item-attack-cap-tests' -Parity),
     (Test-Step 'Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)' 'dcp-skip-intro-tests' -Parity),
+    (Test-Step 'Character Highlight tests (setting, F7 hotkey, atlas signature table, runtime image match, mask outline)' 'dcp-character-highlight-tests' -Parity),
     (Test-Step 'Unlock Gallery tests (view, save safety, synthetic and local boot images)' 'dcp-gallery-unlock-tests' -Parity),
     (Test-Step 'Endgame unlock tests (Stables rule, independent settings, hooks, synthetic and local boot images)' 'dcp-endgame-unlocks-tests' -Parity),
     (Test-Step 'Boss Battle tests (Boss Battle screen on the native Options page, session milestones, native Win signals, Attempt/Win/Death/Quit, result bypass, Inn return and campaign restore, statistics, telemetry caps, local boot images)' 'dcp-boss-battle-tests' -Parity),
@@ -435,6 +510,7 @@ $tests = @(
     (Test-Step 'Early Story Online tests (session rules, shadow record, writer blocks, atomic install, synthetic and local boot images)' 'dcp-early-story-tests' -Parity),
     (Test-Step 'Default message preview tests (records, preview, commit pin, synthetic and local boot images)' 'dcp-default-message-tests' -Parity),
     (Test-Step 'Japanese Menu Buttons tests (synthetic and local boot images)' 'dcp-menu-buttons-tests' -Parity),
+    (Test-Step 'Korean localization tests (USA and Europe profiles, corpus, Hangul atlas and glyph table; the local USA folder is read only)' 'dcp-korean-localization-tests'),
     (Test-Step 'Exit Game tests (title text, four-row menu hooks, install checks)' 'dcp-exit-game-tests'),
     (Test-Step 'Title layout tests (four-row art patch, synthetic layouts)' 'dcp-title-layout-tests'),
     (Test-Step 'Simulated crash trigger tests (DCP_SIMULATE_CRASH parsing and wiring; nothing crashes)' 'dcp-simulate-crash-tests'),
@@ -459,6 +535,9 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
+$defaultFocusName = 'Korean Menu & Subtitles (USA and Europe)'
+$defaultFocusSuites = @('dcp-korean-localization-tests', 'dcp-launcher-tests', 'dcp-build-parity-tests', 'dcp-text-tests')
+$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
@@ -466,6 +545,8 @@ $launcherRendererSuites = @('dcp-launcher-tests')
 $headlessCliSuites = @('dcp-launcher-tests')
 $editorTranslationSuites = @('dcp-save-editor-tests')
 $editorReleaseSuites = @('dcp-save-editor-tests', 'dcp-runtime-overlay-tests', 'dcp-appearance-online-tests')
+$savePageSuites = @('dcp-save-page-tests', 'dcp-save-editor-tests')
+$inventoryEditorSuites = @('dcp-inventory-editor-tests', 'dcp-save-editor-tests')
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -495,19 +576,43 @@ if ($BossBattleOnline) {
             -Key 'dcp-save-editor-tests appearance-translation' -Arguments @('appearance-translation'))
     )
     $requiredSuites = $editorTranslationSuites
+} elseif ($SavePage) {
+    $tests = @(
+        (Test-Step 'Save page tests (overview, DATA slots, backups, export, import, restore, PS3/Vita detection, Editor invalidation, page routing)' 'dcp-save-page-tests'),
+        (Test-Step 'Character Editor quick groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model)' 'dcp-save-editor-tests' `
+            -Key 'dcp-save-editor-tests quick' -Arguments @('quick'))
+    )
+    $requiredSuites = $savePageSuites
+} elseif ($InventoryEditor) {
+    $tests = @(
+        (Test-Step 'Inventory Editor tests (item records, catalog, edits, safety, Apply and Discard, navigation, page structure, Portuguese text)' 'dcp-inventory-editor-tests'),
+        (Test-Step 'Character Editor quick groups (save parse and write, isolation, apply and discard, identity, looks, art, UI model)' 'dcp-save-editor-tests' `
+            -Key 'dcp-save-editor-tests quick' -Arguments @('quick'))
+    )
+    $requiredSuites = $inventoryEditorSuites
 } elseif ($EditorRelease) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
     $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Block { Invoke-LinuxEditorGate }
     $requiredSuites = $editorReleaseSuites
-} else {
+} elseif ($Full) {
     Sync-GpuDependencies
+} else {
+    $tests = @(
+        (Test-Step 'Korean localization tests (USA and Europe profiles, corpus, Hangul atlas and glyph table; the local USA folder is read only)' 'dcp-korean-localization-tests'),
+        (Test-Step 'Korean launcher tests (language lists, saved Korean across builds, Europe profile and record refusal, voice choices, PT-BR and Russian regression)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests korean' -Arguments @('korean')),
+        (Test-Step 'Korean build parity (the contract, the Europe profile, and the real USA corpus and glyph table of every prepared folder)' 'dcp-build-parity-tests' -Capture -Quiet `
+            -Key 'dcp-build-parity-tests korean' -Arguments @('korean')),
+        (Test-Step 'Text tests (system font set: Noto Sans KR only for the port Korean, every other language unchanged)' 'dcp-text-tests')
+    )
+    $requiredSuites = $defaultFocusSuites
 }
 
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-save-editor-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -661,6 +766,24 @@ if ($HeadlessCli) {
     Write-Host 'Headless command interface tests passed.' -ForegroundColor Green
     exit 0
 }
+if ($SavePage) {
+    Write-Host ''
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Save page tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($InventoryEditor) {
+    Write-Host ''
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Inventory Editor tests passed.' -ForegroundColor Green
+    exit 0
+}
 if ($EditorTranslation -or $EditorRelease) {
     $windowsLines = if ($EditorRelease) { @($captured['dcp-save-editor-tests release'] + $captured['dcp-runtime-overlay-tests'] + $captured['dcp-appearance-online-tests']) } else { @($captured['dcp-save-editor-tests appearance-translation']) }
     $windowsEditor = Read-EditorRun $windowsLines
@@ -682,6 +805,31 @@ if ($EditorTranslation -or $EditorRelease) {
         exit 1
     }
     Write-Host 'Character Editor tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($useDefaultFocus) {
+    $linuxFocus = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux *' } | Select-Object -First 1
+    Write-Host ''
+    Write-Host "Focused development run ($defaultFocusName; pass -Full for the complete release matrix):" -ForegroundColor Cyan
+    foreach ($test in $tests) {
+        $name = Get-TestName $test
+        if ($name -like 'Linux *') { continue }
+        $status = if ($skipped.ContainsKey($name)) { "SKIPPED ($($skipped[$name]))" } elseif ($failed.Contains($name)) { "FAIL ($(Format-ExitCode $exitCodes[$name]))" } else { 'PASS' }
+        $color = if ($skipped.ContainsKey($name)) { 'Yellow' } elseif ($failed.Contains($name)) { 'Red' } else { 'Green' }
+        Write-Host ("  Windows {0}: {1}" -f $name, $status) -ForegroundColor $color
+    }
+    if ($linuxFocus -and $skipped.ContainsKey($linuxFocus)) {
+        Write-Host "  ${linuxFocus}: SKIPPED ($($skipped[$linuxFocus]))" -ForegroundColor Yellow
+    } elseif ($linuxFocus -and $failed.Contains($linuxFocus)) {
+        Write-Host "  ${linuxFocus}: FAIL ($(Format-ExitCode $exitCodes[$linuxFocus]))" -ForegroundColor Red
+    } elseif ($linuxFocus) {
+        Write-Host "  ${linuxFocus}: PASS" -ForegroundColor Green
+    }
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Focused tests ($defaultFocusName) passed." -ForegroundColor Green
     exit 0
 }
 $parityOutput = @($captured['dcp-build-parity-tests'])

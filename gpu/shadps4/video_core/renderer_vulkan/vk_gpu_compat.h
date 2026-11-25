@@ -71,10 +71,74 @@ constexpr PipelineStateRoute ChoosePipelineState(const Capabilities& caps) {
     };
 }
 
+enum class TargetSampleAction {
+    NormalSample,
+    StorageGeneral,
+    FeedbackLoopLayout,
+    SnapshotCopy,
+};
+
+// Without VK_EXT_attachment_feedback_loop_layout, sampling an active color attachment in GENERAL
+// layout is undefined behavior (and breaks TBDR tile memory coherency). Sample a pre-draw copy.
+constexpr TargetSampleAction ChooseTargetSampleAction(const PipelineStateRoute& route,
+                                                      bool is_target, bool is_storage,
+                                                      bool force_general, bool is_depth) {
+    if (is_storage) {
+        return TargetSampleAction::StorageGeneral;
+    }
+    if (is_depth) {
+        return TargetSampleAction::NormalSample;
+    }
+    if (is_target && !force_general) {
+        return route.feedback_loop ? TargetSampleAction::FeedbackLoopLayout
+                                   : TargetSampleAction::SnapshotCopy;
+    }
+    if (force_general) {
+        return TargetSampleAction::StorageGeneral;
+    }
+    return TargetSampleAction::NormalSample;
+}
+
+constexpr bool UsesFeedbackLoopAttachment(const PipelineStateRoute& route, bool is_bound,
+                                          bool sampled_snapshot) {
+    return route.feedback_loop ? is_bound : (is_bound && !sampled_snapshot);
+}
+
+constexpr bool NeedsProvokingVertexPassBreak(bool provoking_supported, bool per_pipeline_supported,
+                                             bool active_rendering, bool current_last,
+                                             bool next_last) {
+    return provoking_supported && !per_pipeline_supported && active_rendering &&
+           current_last != next_last;
+}
+
 constexpr bool ForceColorSamplesToDepth(const Capabilities& caps, bool all_color_samples_same,
                                         bool depth_mismatch) {
     return (!all_color_samples_same && !caps.mixed_any_samples) ||
            (all_color_samples_same && depth_mismatch && !caps.mixed_depth_samples);
+}
+
+constexpr bool NeedsMixedSamplesInfo(const PipelineStateRoute& route,
+                                     std::uint32_t rasterization_samples,
+                                     const std::uint32_t* color_samples,
+                                     std::uint32_t color_attachment_count,
+                                     bool has_depth_stencil, std::uint32_t depth_samples) {
+    if (!route.mixed_samples_info) {
+        return false;
+    }
+    const std::uint32_t raster = rasterization_samples ? rasterization_samples : 1u;
+    for (std::uint32_t i = 0; i < color_attachment_count; ++i) {
+        const std::uint32_t samples = color_samples[i] ? color_samples[i] : 1u;
+        if (samples != raster) {
+            return true;
+        }
+    }
+    if (has_depth_stencil) {
+        const std::uint32_t depth = depth_samples ? depth_samples : 1u;
+        if (depth != raster) {
+            return true;
+        }
+    }
+    return false;
 }
 
 constexpr const char* InterpolationName(Interpolation interpolation) {

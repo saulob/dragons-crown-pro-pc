@@ -28,6 +28,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -387,6 +388,68 @@ def disallowed_characters(text, source):
     return ''.join(bad)
 
 
+FONT_ASCII_WIDTH = {
+    ' ': 22, '!': 20, '"': 22, '#': 40, '$': 42, '%': 54, '&': 52, "'": 22, '(': 26, ')': 26, '*': 32, '+': 44,
+    ',': 18, '-': 28, '.': 18, '/': 24, '0': 42, '1': 42, '2': 42, '3': 42, '4': 42, '5': 42, '6': 42, '7': 42,
+    '8': 42, '9': 42, ':': 18, ';': 18, '<': 36, '=': 44, '>': 36, '?': 38, '@': 54, 'A': 48, 'B': 46, 'C': 46,
+    'D': 50, 'E': 42, 'F': 42, 'G': 50, 'H': 50, 'I': 18, 'J': 36, 'K': 44, 'L': 42, 'M': 58, 'N': 50, 'O': 54,
+    'P': 48, 'Q': 54, 'R': 48, 'S': 42, 'T': 46, 'U': 50, 'V': 46, 'W': 62, 'X': 46, 'Y': 44, 'Z': 42, '[': 26,
+    '\\': 24, ']': 26, '^': 38, '_': 30, '`': 22, 'a': 36, 'b': 40, 'c': 36, 'd': 42, 'e': 36, 'f': 24, 'g': 38,
+    'h': 40, 'i': 18, 'j': 20, 'k': 36, 'l': 18, 'm': 58, 'n': 40, 'o': 40, 'p': 40, 'q': 40, 'r': 28, 's': 32,
+    't': 26, 'u': 40, 'v': 36, 'w': 56, 'x': 36, 'y': 38, 'z': 34, '{': 22, '|': 22, '}': 22, '~': 40,
+}
+EVENT_LINE1_MAX_WIDTH = 2816
+EVENT_LINE2_MAX_WIDTH = 2530
+BAD_PTBR_EXPANSION = re.compile(
+    r'\b(?:Missãos|Missão\(s\)|Ponto de Vidas|Habilidads|'
+    r'(?:o|os|um|uns|no|nos|do|dos|ao|aos|seu|seus|múltiplo|múltiplos)\s+Bolsas?|'
+    r'(?:a|as|uma|umas|na|nas|da|das|sua|suas)\s+(?:Arsenal|Coliseu|Portão|Labirinto)|'
+    r'(?:o|um|no|do|ao)\s+Estábulos)\b',
+    re.IGNORECASE,
+)
+
+
+def line_glyph_width(line):
+    total = 0
+    for ch in visible(line):
+        base = unicodedata.normalize('NFD', ch)[0] if ch > '~' else ch
+        total += FONT_ASCII_WIDTH.get(base, 36)
+    return total
+
+
+def expand_ptbr_tags(text, tag_values):
+    cur = text
+    for _ in range(5):
+        nxt = cur
+        for k, v in tag_values.items():
+            nxt = nxt.replace(k, v)
+        if nxt == cur:
+            break
+        cur = nxt
+    return cur
+
+
+def ptbr_quality_errors(sheet, index, text, source=None, tag_values=None):
+    errors = []
+    if source is not None:
+        if '  ' in text and '  ' not in source:
+            errors.append('accidental repeated spaces')
+        if balanced(tokens(source)) and not balanced(tokens(text)):
+            errors.append('unbalanced control tags')
+    if re.search(r'##\(COLOR_(?:C_QUEST|LP)\)(?:@c\([^)]*\))?(?:s|\(s\))', text):
+        errors.append('malformed English plural suffix on Portuguese tag')
+    expanded = visible(expand_ptbr_tags(text, tag_values)) if tag_values else visible(text)
+    if (m := BAD_PTBR_EXPANSION.search(expanded)):
+        errors.append(f'invalid PT-BR expanded form: {m.group(0)!r}')
+    if sheet == 'EventMsg' and '----' not in text:
+        lines = text.split('\n')
+        if lines and line_glyph_width(lines[0]) > EVENT_LINE1_MAX_WIDTH:
+            errors.append(f'EventMsg line 1 width {line_glyph_width(lines[0])} exceeds {EVENT_LINE1_MAX_WIDTH}')
+        if len(lines) >= 2 and line_glyph_width(lines[-1]) > EVENT_LINE2_MAX_WIDTH:
+            errors.append(f'EventMsg bottom line width {line_glyph_width(lines[-1])} exceeds {EVENT_LINE2_MAX_WIDTH}')
+    return errors
+
+
 def record_errors(sheet, english, index, text):
     """What stops `text` replacing English record `index`; the runtime refuses the same (game_translation.cpp)."""
     errors = []
@@ -404,11 +467,23 @@ def record_errors(sheet, english, index, text):
         if formatted(b):
             errors.append('a printf conversion in text the game does not format')
         a, b = [t for t in a if t[0] != '%'], [t for t in b if t[0] != '%']
+    is_color = lambda t: t.startswith('@c(') or t == '@/c'
+    is_tag = lambda t: t.startswith('##(')
+    non_style = lambda xs: [t for t in xs if not is_color(t) and not is_tag(t)]
     if [t for t in a if is_printf(t)] != [t for t in b if is_printf(t)]:
         errors.append(f'printf conversions differ: {[t for t in a if is_printf(t)]} != {[t for t in b if is_printf(t)]}')
-    elif Counter(a) != Counter(b):
-        missing, extra = Counter(a) - Counter(b), Counter(b) - Counter(a)
+    elif Counter(non_style(a)) != Counter(non_style(b)):
+        missing, extra = Counter(non_style(a)) - Counter(non_style(b)), Counter(non_style(b)) - Counter(non_style(a))
         errors.append(f'control sequences differ: missing {sorted(missing.elements())}, extra {sorted(extra.elements())}')
+    elif Counter(t for t in b if is_tag(t)) - Counter(t for t in a if is_tag(t)):
+        extra = Counter(t for t in b if is_tag(t)) - Counter(t for t in a if is_tag(t))
+        errors.append(f'control sequences differ: extra {sorted(extra.elements())}')
+    elif balanced(a) and not balanced(b):
+        errors.append('control sequences differ: unbalanced color or timing spans')
+    elif Counter(t for t in a if is_tag(t)) == Counter(t for t in b if is_tag(t)) and Counter(a) != Counter(b):
+        if not re.search(r'##\(COLOR_[A-Z0-9_]+\)@c\([^)]*\)s@/c', source):
+            missing, extra = Counter(a) - Counter(b), Counter(b) - Counter(a)
+            errors.append(f'control sequences differ: missing {sorted(missing.elements())}, extra {sorted(extra.elements())}')
     bad = disallowed_characters(text, source)
     if bad:
         errors.append(f'characters outside the PT-BR set: {bad!r}')
@@ -1058,7 +1133,13 @@ def cmd_validate(args):
     glossary, problems = load_glossary()
     report = Report(errors=list(problems) + adaptation_errors())
     usable = tracked_usable(game, glossary, report)
+    en_sys = game.records('SystemMsg', 'en')
+    pt_sys = [usable.get('SystemMsg', {}).get(i, en_sys[i]) for i in range(len(en_sys))]
+    tag_values = {en_sys[i]: pt_sys[i + 117] for i in TAG_KEYS if en_sys[i].startswith('##(')}
     for sheet, records in usable.items():
+        en_sheet = game.records(sheet, 'en')
+        for index, text in records.items():
+            report.errors += [f'{sheet} {index}: {e}' for e in ptbr_quality_errors(sheet, index, text, en_sheet[index], tag_values)]
         try:
             data = generate_sheet(game.raw(sheet), records)
             report.errors += [f'{sheet} generated: {p}' for p in check_generated(game.raw(sheet), data, records)]
@@ -1546,6 +1627,31 @@ def cmd_selftest(_args):
     expect(all(set(group) <= system for group in pieces),
            'every piece of a sentence the English builds from several records, and the cognate option values, is in the corpus')
     expect(('SystemMsg', 1444) in load_adaptations().get('JP', {}), 'the Town Map help has the Japanese slot\'s wording')
+    tags = {'##(C_QUEST)': 'Missão', '##(COLOR_C_QUEST)': '@c(13)##(C_QUEST)@/c',
+            '##(LP)': 'Ponto de Vida', '##(COLOR_LP)': '@c(19)##(LP)@/c',
+            '##(CUSTOMSET)': 'Bolsa', '##(COLOR_CUSTOMSET)': '@c(13)##(CUSTOMSET)@/c',
+            '##(ITEMBOX)': 'Arsenal', '##(COLOR_ITEMBOX)': '@c(13)##(ITEMBOX)@/c',
+            '##(P_ARENA)': 'Coliseu', '##(COLOR_P_ARENA)': '@c(13)##(P_ARENA)@/c',
+            '##(P_ENTRANCE)': 'Portão', '##(COLOR_P_ENTRANCE)': '@c(13)##(P_ENTRANCE)@/c',
+            '##(P_STABLE)': 'Estábulos', '##(COLOR_P_STABLE)': '@c(13)##(P_STABLE)@/c',
+            '##(R_RD)': 'Labirinto do Caos', '##(COLOR_R_RD)': '@c(13)##(R_RD)@/c'}
+    expect(ptbr_quality_errors('SystemMsg', 1452, 'Agora você pode selecionar ##(COLOR_C_QUEST)@c(13)s@/c.', '', tags) != [],
+           'Missãos tag plural refused')
+    expect(ptbr_quality_errors('SystemMsg', 1452, 'Agora você pode selecionar @c(13)Missões@/c.', '', tags) == [],
+           'explicit Missões passes')
+    expect(ptbr_quality_errors('SystemMsg', 1436, 'Os ##(COLOR_LP)@c(19)s@/c.', '', tags) != [], 'Ponto de Vidas refused')
+    expect(ptbr_quality_errors('SystemMsg', 1436, 'Os @c(19)Pontos de Vida@/c.', '', tags) == [], 'Pontos de Vida passes')
+    expect(ptbr_quality_errors('SystemMsg', 771, 'Você não aceitou nenhuma ##(COLOR_C_QUEST).', '', tags) == [], 'singular Missão passes')
+    expect(ptbr_quality_errors('SystemMsg', 100, 'Texto  duplo.', 'Text single.', tags) != [], 'double space refused')
+    expect(ptbr_quality_errors('EventMsg', 220, 'Curta\nWallace estava fora, mas ele está sendo atacado por usuários de magia malevolente.', '', tags) != [],
+           'EventMsg bottom line overflow refused')
+    expect(ptbr_quality_errors('EventMsg', 220, 'Ele diz que foi encarregado de cuidar do laboratório na ausência de Wallace,\nmas está sendo atacado por usuários de magia malevolente.', '', tags) == [],
+           'EventMsg 220 prompt-safe layout passes')
+    for sheet_name in ('SystemMsg', 'EventMsg', 'AbilityList', 'CustomItem'):
+        for entry in corpus_entries(sheet_name):
+            for idx in entry_indices(entry):
+                expect(ptbr_quality_errors(sheet_name, idx, entry['pt_br'], None, tags) == [],
+                       f'tracked {sheet_name} {idx} passes quality gate')
     print(f'selftest: {len(check)} checks passed')
     return 0
 

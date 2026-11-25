@@ -6,6 +6,7 @@ import { PROTECTION, RateLimiter } from './abuse.js';
 import { ipGroup } from './edge.js';
 import { DUMP_FRAME, INCIDENT, INCIDENT_LIMITED, IncidentDesk, isMinidump, readClaim, readClaims, readFeedback, readIncident } from './incidents.js';
 import { CAPABILITIES, Relay } from './relay.js';
+import { difficultyCategory } from './difficulty.js';
 import { parsePartyReport } from './party.js';
 import { CommsUsage, commsSummary, parseCommsReport } from './comms_usage.js';
 import { Metrics, countryCode, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
@@ -14,6 +15,9 @@ import { BOSS_STATE_ATTR, BossUsage } from './boss_usage.js';
 import { STORY_ROLES, STORY_SEEN_PER_ROOM, StoryUsage, storyRole } from './story_usage.js';
 
 export const PROTOCOL = 1;
+
+const LIFETIME_TTL_MS = 10 * 60_000;
+const MONTH_TTL_MS = 10 * 60_000;
 
 export const LIMITS = {
   frameBytes: 32 * 1024,
@@ -125,6 +129,7 @@ const MIGRATIONS = [
   [`ALTER TABLE rooms ADD COLUMN platforms INTEGER NOT NULL DEFAULT 0`],
   [`ALTER TABLE rooms ADD COLUMN story_seen TEXT NOT NULL DEFAULT '[]'`],
   [`ALTER TABLE members ADD COLUMN appearance TEXT NOT NULL DEFAULT ''`],
+  [`ALTER TABLE rooms ADD COLUMN difficulty TEXT NOT NULL DEFAULT ''`],
 ];
 
 // ---- input validation ----
@@ -624,6 +629,51 @@ export class Lobby {
       comms: this.commsSummary() };
   }
 
+  attempt(read) {
+    try {
+      return read();
+    } catch (error) {
+      this.host.log(`lobby: statistics read failed: ${error?.stack ?? error}`);
+      return null;
+    }
+  }
+
+  // Totals since tracking began; they change slowly, so a complete answer is kept for LIFETIME_TTL_MS.
+  lifetime() {
+    const now = this.host.now();
+    if (this.lifetimeMemo && now - this.lifetimeMemo.at < LIFETIME_TTL_MS) return this.lifetimeMemo.value;
+    const history = this.attempt(() => this.metrics.showcaseLifetime());
+    const value = { sessions: history?.sessions ?? null, since: history?.since ?? null,
+      players: this.attempt(() => this.host.sql.get('SELECT COUNT(*) AS n FROM accounts').n) };
+    if (value.sessions !== null && value.players !== null) this.lifetimeMemo = { at: now, value };
+    return value;
+  }
+
+  // Reads every dimension row of 30 days, so a complete answer is kept for MONTH_TTL_MS.
+  month() {
+    const now = this.host.now();
+    if (this.monthMemo && now - this.monthMemo.at < MONTH_TTL_MS) return this.monthMemo.value;
+    const month = this.metrics.showcaseMonth();
+    const value = { ...month, classes: this.attempt(() => this.metrics.classUsage(month.first, month.last)) };
+    if (value.classes !== null) this.monthMemo = { at: now, value };
+    return value;
+  }
+
+  // The public statistics: a section, or an optional value in one, that cannot be read is null, never zero.
+  showcase() {
+    return {
+      generated: this.host.now(),
+      live: this.attempt(() => {
+        const live = this.liveMetrics();
+        return { online: live.online, lobby: this.lobbyEntries().length, in_rooms: live.in_rooms, open_rooms: live.rooms,
+          peak_today: this.attempt(() => Math.max(this.metrics.todayRow().peak_online, live.online)) };
+      }),
+      today: this.attempt(() => this.metrics.showcaseToday()),
+      last_30_days: this.attempt(() => this.month()),
+      lifetime: this.lifetime(),
+    };
+  }
+
   // Early Story Online as the dashboard shows it: rooms and seats from the live tables, history from the counters.
   storySummary() {
     const now = this.host.now();
@@ -866,7 +916,7 @@ export class Lobby {
     const rest = this.memberRows(roomId);
     if (!rest.length) {
       this.track(() => this.metrics.roomClosed({ peak: room.peak_members, lifetimeMs: this.host.now() - room.created,
-        relayed: room.relayed === 1, platforms: room.platforms }));
+        relayed: room.relayed === 1, platforms: room.platforms, difficulty: room.difficulty }));
       this.host.sql.run('DELETE FROM rooms WHERE id = ?', roomId);
       this.relays.forgetRoom(roomId);
       return;
@@ -1348,6 +1398,8 @@ const HANDLERS = {
       flags = (flags | FLAG_HIDDEN) >>> 0;
     }
     if (bossBattleOf(ints) > 0 && !att.boss_battle_session) fail('bad_request', 'boss_battle_session');
+    const difficulty = difficultyCategory(msg.difficulty);
+    if (difficulty === null) fail('bad_request', 'difficulty');
     const binInt = merge([], binAttrs(msg.bin_int), LIMITS.binAttrsPerArray);
     const binExt = merge([], binAttrs(msg.bin_ext), LIMITS.binAttrsPerArray);
     const memberBin = binAttrs(msg.member_bin);
@@ -1359,9 +1411,9 @@ const HANDLERS = {
     do code = this.randomCode(6);
     while (this.host.sql.get('SELECT 1 AS x FROM rooms WHERE code = ?', code));
     this.host.sql.run(`INSERT INTO rooms (id, game, world, slots, flags, owner, code, key, ints, bin_int, bin_ext, created,
-      online_protocol, peak_members, platforms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`, id, att.game, msg.world,
+      online_protocol, peak_members, platforms, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`, id, att.game, msg.world,
     msg.slots, (flags & ~FLAG_FULL) >>> 0, MEMBER_IDS[0], code, this.randomHex(16), JSON.stringify(ints), JSON.stringify(binInt),
-    JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0, platformBit(att.platform));
+    JSON.stringify(binExt), this.host.now(), att.online_protocol ?? 0, platformBit(att.platform), difficulty);
     this.insertMember(att, id, MEMBER_IDS[0], memberBin);
     this.track(() => this.metrics.count('rooms_created'));
     if (isStorySession(ints)) {

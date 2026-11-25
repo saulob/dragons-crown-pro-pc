@@ -10,6 +10,7 @@
 
 #include "host.h"
 #include "loading_view.h"
+#include "page_icons.h"
 #include "localization/ui_text.h"
 #include "trg/launcher.h"
 #include "trg/layout.h"
@@ -21,10 +22,23 @@ constexpr const char* kMiddleDot = " \xC2\xB7 ";
 
 } // namespace
 
+ImTextureID EditorPage::ButtonIconTexture(ButtonIcon icon, int pixels) {
+    const auto [entry, is_new] = button_icons_.try_emplace({icon, pixels});
+    if (is_new) {
+        const FileIconAsset& asset = icon == ButtonIcon::kAppearance ? kAppearanceIcon : icon == ButtonIcon::kInventory ? kInventoryIcon : kBackIcon;
+        const std::vector<uint8_t> rgba = RenderFileIcon(asset, pixels);
+        if (!rgba.empty()) {
+            entry->second = host_.CreateTexture(rgba.data(), pixels, pixels);
+        }
+    }
+    return entry->second;
+}
+
 EditorPage::EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
-                       std::function<std::string()> message_suffix)
+                       std::function<std::string()> message_suffix, const SaveSelection* selection)
     : host_(host), user_dir_(std::move(user_dir)), game_(std::move(game)), message_suffix_(std::move(message_suffix)),
-      custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)) {}
+      selection_(selection), custom_saved_(CustomStorePath(user_dir_)), custom_working_(CustomStorePath(user_dir_)),
+      override_saved_(CharacterOverrideStorePath(user_dir_)), override_working_(CharacterOverrideStorePath(user_dir_)) {}
 
 const EditorBuild* EditorPage::SelectedBuild() const {
     return selected_build_ < builds_.size() ? &builds_[selected_build_] : nullptr;
@@ -35,13 +49,6 @@ std::vector<size_t> EditorPage::VisibleSaves() const {
         return SavesOfBuild(saves_, *build);
     }
     return {};
-}
-
-int EditorPage::FirstSaveOf(const std::vector<size_t>& visible) const {
-    for (const size_t index : visible) {
-        if (saves_[index].model.valid()) return int(index);
-    }
-    return visible.empty() ? -1 : int(visible.front());
 }
 
 void EditorPage::UseArtOf(const EditorBuild* build) {
@@ -64,10 +71,18 @@ void EditorPage::UseArtOf(const EditorBuild* build) {
     sources.cache_dir = EditorCacheDir(user_dir_);
     art_.emplace(std::move(sources));
     art_root_ = root;
+    catalog_key_.clear();
+    for (const auto& [key, texture] : icon_textures_) host_.DestroyTexture(texture);
+    icon_textures_.clear();
+    for (const auto& [letter, texture] : rank_textures_) host_.DestroyTexture(texture);
+    rank_textures_.clear();
+    icons_ = {};
 }
 
 void EditorPage::Refresh() {
+    const std::filesystem::path selected = selection_ ? selection_->save0 : std::filesystem::path();
     const std::filesystem::path kept_save = SelectedSave() ? SelectedSave()->save0_path : std::filesystem::path();
+    if (selection_) seen_generation_ = selection_->generation;
     current_game_ = game_ ? game_() : EditorGame{};
     builds_ = ListEditorBuilds(current_game_.roots, current_game_.configured);
     selected_build_ = DefaultBuildIndex(builds_);
@@ -75,16 +90,14 @@ void EditorPage::Refresh() {
 
     saves_ = DiscoverSaves(user_dir_, current_game_.configured ? current_game_.configured->title_id : "");
     const std::vector<size_t> visible = VisibleSaves();
-    int chosen = -1;
-    for (const size_t index : visible) {
-        if (saves_[index].save0_path == kept_save) chosen = int(index);
-    }
-    const bool kept = chosen >= 0;
+    const std::filesystem::path preferred[] = {selected, kept_save};
+    int chosen = ChooseSave(saves_, visible, preferred);
+    const bool kept = chosen >= 0 && saves_[chosen].save0_path == kept_save;
     if (!kept) {
-        chosen = FirstSaveOf(visible);
         selected_slot_ = 0;
         selected_character_ = -1;
         nav_.Back();
+        ResetInventoryView();
     }
     selected_save_ = chosen;
     edit_.reset();
@@ -94,6 +107,8 @@ void EditorPage::Refresh() {
     }
     custom_error_ = custom_saved_.Load() ? std::string() : custom_saved_.error();
     custom_working_ = custom_saved_;
+    override_saved_.Load();
+    override_working_ = override_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
 }
@@ -141,24 +156,43 @@ void EditorPage::SelectSlot(int slot, trg::Ui& ui) {
     selected_slot_ = slot;
     selected_character_ = -1;
     nav_.Back();
+    ResetInventoryView();
     SyncNameBuffer();
 }
 
 void EditorPage::SelectCharacter(int character) {
     selected_character_ = character;
     nav_.Open(character);
+    ResetInventoryView();
     appearance_failed_ = false;
     SyncNameBuffer();
 }
 
 void EditorPage::ApplyChanges(trg::Ui& ui) {
+    if (!PrepareInventorySave(ui)) {
+        return;
+    }
     if (!dirty()) {
         return;
     }
-    const ApplyOutcome outcome = ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_);
+    const ApplyOutcome outcome =
+        [&] {
+            CharacterOverrideStore override_next = override_working_;
+            if (edit_ && override_saved_.error().empty()) {
+                if (const DiscoveredSave* save = SelectedSave())
+                    SyncCharacterOverrides(override_next, edit_->working(), edit_->persisted(), save->title_id,
+                                           save->dir_name);
+            }
+            return ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_, &override_next,
+                            &override_saved_);
+        }();
     if (outcome.ok()) {
+        typed_.Clear();
+        typing_.End();
+        KeepSearchMatchingSavedItem();
         if (edit_ && selected_save_ >= 0) saves_[selected_save_].model = edit_->persisted();
         custom_working_ = custom_saved_;
+        override_working_ = override_saved_;
         confirm_reset_custom_ = false;
         SyncNameBuffer();
         ui.SetStatus(Tr("Changes applied."), 4.0);
@@ -168,9 +202,19 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
         ui.SetStatus(Tr("Could not write the custom appearance; nothing was applied."), 8.0);
         return;
     }
+    if (outcome.override_failed) {
+        ui.SetStatus(Tr("Could not write the character stats; nothing was applied."), 8.0);
+        return;
+    }
     switch (outcome.save) {
     case SaveEdit::Result::kInvalidAppearance:
         ui.SetStatus(Tr("A character has an invalid appearance value. Pick a color for it, then Apply Changes."), 8.0);
+        break;
+    case SaveEdit::Result::kInvalidHp:
+        ui.SetStatus(Tr("The current HP cannot be higher than the maximum HP."), 8.0);
+        break;
+    case SaveEdit::Result::kInvalidInventory:
+        ui.SetStatus(InventoryProblemText(edit_ ? edit_->detail() : std::string()), 8.0);
         break;
     case SaveEdit::Result::kInvalidSave:
         ui.SetStatus(Tr("The changes are not valid and were not saved."), 6.0);
@@ -178,17 +222,34 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     case SaveEdit::Result::kBackupFailed:
         ui.SetStatus(Tr("Could not create a backup; the save was not changed."), 6.0);
         break;
+    case SaveEdit::Result::kStale:
+        Refresh();
+        ui.SetStatus(Tr("The save changed on disk since the Editor loaded it, so the changes were not written. The Editor "
+                        "reloaded the save."),
+                     10.0);
+        break;
     default:
         ui.SetStatus(Tr("Could not write the save; the original was left untouched."), 6.0);
         break;
     }
 }
 
+const char* EditorPage::InventoryProblemText(const std::string& problem) const {
+    if (problem == kProblemMaxDurability) return Tr("Max durability exceeds the limit the game keeps.");
+    if (problem == kProblemLevel) return Tr("Required level is invalid.");
+    if (problem == kProblemModifier) return Tr("Modifier value is outside the supported range.");
+    if (problem == kProblemItem) return Tr("This item cannot be changed.");
+    return Tr("An inventory change is not valid and was not saved.");
+}
+
 void EditorPage::DiscardChanges(trg::Ui& ui) {
     if (edit_) {
         edit_->Discard();
     }
+    typed_.Clear();
+    typing_.End();
     custom_working_ = custom_saved_;
+    override_working_ = override_saved_;
     confirm_reset_custom_ = false;
     SyncNameBuffer();
     ui.SetStatus(Tr("Changes discarded."), 4.0);
@@ -313,7 +374,8 @@ void EditorPage::DrawChanges(trg::Ui& ui) {
 
 void EditorPage::Draw(trg::Ui& ui) {
     const int frame = ImGui::GetFrameCount();
-    if (frame > last_frame_ + 1 && !dirty()) refresh_pending_ = true;
+    const bool replaced = selection_ && selection_->generation != seen_generation_;
+    if ((frame > last_frame_ + 1 || replaced) && !dirty()) refresh_pending_ = true;
     last_frame_ = frame;
     if (refresh_pending_) {
         if (!loaded_ && !std::exchange(loading_shown_, true)) {
@@ -405,7 +467,8 @@ void EditorPage::DrawSaveData(trg::Ui& ui) {
     }
 }
 
-bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed, FieldStyle style) {
+bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed,
+                               FieldStyle style, bool positional_marker) {
     ImGui::PushID(id);
     const int initial = *value;
     const float scale = ui.scale();
@@ -422,14 +485,19 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         draw->AddLine(ImVec2(mid.x - arm, mid.y), ImVec2(mid.x + arm, mid.y), glyph_color, kNumberGlyphThickness * scale);
         if (plus) draw->AddLine(ImVec2(mid.x, mid.y - arm), ImVec2(mid.x, mid.y + arm), glyph_color, kNumberGlyphThickness * scale);
     };
+    ImGui::PushItemFlag(ImGuiItemFlags_ButtonRepeat, true);
     if (ImGui::Button("##minus", ImVec2(button, height))) {
         *value = StepNumber(*value, -1, range);
     }
+    ImGui::PopItemFlag();
     glyph(false);
     ImGui::SameLine();
     const ImGuiID field_id = ImGui::GetID("##value");
     const ImVec4 accent = ui.theme().accent;
-    if (editing_number_ == field_id) {
+    if (const std::optional<std::string> handed = typed_.TakeHanded(field_id)) {
+        if (const std::optional<int> typed = CommitTypedNumber(*handed, range, *value)) *value = *typed;
+    }
+    if (typed_.Editing(field_id)) {
         ImGui::SetNextItemWidth(field);
         if (focus_number_) {
             ImGui::SetKeyboardFocusHere();
@@ -438,35 +506,68 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         const bool entered = ImGui::InputText("##value", number_buffer_, sizeof(number_buffer_),
                                               ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_EnterReturnsTrue |
                                                   ImGuiInputTextFlags_AutoSelectAll);
-        if (entered) {
-            if (const std::optional<int> typed = ParseNumber(number_buffer_, range)) {
-                *value = *typed;
-            }
-        }
-        if (entered || ImGui::IsItemDeactivated()) {
-            editing_number_ = 0;
+        typing_now_ = true;
+        const bool finished = entered || ImGui::IsItemDeactivated();
+        typed_finished_ = finished;
+        if (const std::optional<int> exact = ExactTypedNumber(number_buffer_, range); exact && *exact != *value) *value = *exact;
+        if (finished) {
+            if (const std::optional<int> typed = CommitTypedNumber(number_buffer_, range, *value)) *value = *typed;
+            typed_.End();
         }
     } else {
         const int before = *value;
         int shown = before;
         const std::string text = FormatThousands(before);
         ImGui::SetNextItemWidth(field);
-        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, kNumberThumbMinWidth * scale);
-        if (style == FieldStyle::kChanged) ImGui::PushStyleColor(ImGuiCol_Text, accent);
+        const float grab_min = kNumberThumbMinWidth * scale;
+        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, grab_min);
         constexpr ImGuiSliderFlags flags = ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_NoInput;
-        if (NumberHasThumb(range)) {
-            ImGui::SliderInt("##value", &shown, range.min, range.max, text.c_str(), flags);
+        const bool thumb = positional_marker || NumberHasThumb(range);
+        if (thumb) {
+            ImGui::SliderInt("##value", &shown, range.min, range.max, "", flags);
         } else {
-            ImGui::DragInt("##value", &shown, drag_speed, range.min, range.max, text.c_str(), flags);
+            ImGui::DragInt("##value", &shown, drag_speed, range.min, range.max, "", flags);
         }
-        if (style == FieldStyle::kChanged) ImGui::PopStyleColor();
         ImGui::PopStyleVar();
+        if (ImGui::IsItemActivated()) {
+            drag_id_ = field_id;
+            drag_press_x_ = ImGui::GetIO().MousePos.x;
+            drag_started_ = false;
+        }
+        if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left) && drag_id_ == field_id && !drag_started_) {
+            drag_started_ = SliderDragStarted(drag_press_x_, ImGui::GetIO().MousePos.x, scale);
+            if (!drag_started_) shown = before;
+        }
+        // One unit per pixel while Shift is held: a track over thousands of values cannot reach each value otherwise.
+        if (ImGui::IsItemActive() && ImGui::GetIO().KeyShift) {
+            if (!fine_drag_) {
+                fine_drag_ = true;
+                fine_anchor_value_ = before;
+                fine_anchor_x_ = ImGui::GetIO().MousePos.x;
+            }
+            shown = FineDragValue(fine_anchor_value_, ImGui::GetIO().MousePos.x - fine_anchor_x_, range);
+        } else {
+            fine_drag_ = false;
+        }
+        const ImVec2 frame_min = ImGui::GetItemRectMin(), frame_max = ImGui::GetItemRectMax();
+        const float text_width = ImGui::CalcTextSize(text.c_str()).x;
+        const float text_x = (frame_min.x + frame_max.x - text_width) * 0.5f;
+        ImU32 color = style == FieldStyle::kChanged ? ImGui::GetColorU32(accent) : ImGui::GetColorU32(ImGuiCol_Text);
+        if (thumb) {
+            const Span grab = SliderGrabSpan(frame_min.x, frame_max.x, range, ClampNumber(shown, range), grab_min);
+            if (TextOverSpan({text_x, text_x + text_width}, grab)) color = IM_COL32_WHITE;
+        }
+        ImGui::GetWindowDrawList()->AddText(ImVec2(text_x, frame_min.y + (frame_max.y - frame_min.y - ImGui::GetTextLineHeight()) * 0.5f), color,
+                                            text.c_str());
         const bool activated = ImGui::IsItemActivated();
         const bool double_click = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-        if (activated && !double_click) press_value_ = before;
+        if (activated && !double_click) {
+            press_id_ = field_id;
+            press_value_ = before;
+        }
         if (double_click || (activated && ImGui::GetIO().KeyCtrl)) {
-            *value = activated && !double_click ? before : press_value_;
-            editing_number_ = field_id;
+            *value = (activated && !double_click) || press_id_ != field_id ? before : press_value_;
+            typed_.Begin(field_id, number_buffer_);
             focus_number_ = true;
             std::snprintf(number_buffer_, sizeof(number_buffer_), "%d", *value);
         } else {
@@ -474,12 +575,55 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
         }
     }
     ImGui::SameLine();
+    ImGui::PushItemFlag(ImGuiItemFlags_ButtonRepeat, true);
     if (ImGui::Button("##plus", ImVec2(button, height))) {
         *value = StepNumber(*value, 1, range);
     }
+    ImGui::PopItemFlag();
     glyph(true);
     ImGui::PopID();
     return *value != initial;
+}
+
+void EditorPage::ItemField(trg::Ui& ui, const ItemRef& ref, const std::string& key, NumberRange range, float drag_speed, bool changed) {
+    SaveModel& edited = edit_->working();
+    const std::optional<int> current = ItemFieldValue(edited, ref, key);
+    if (!current) return;
+    int value = *current;
+    const std::vector<uint8_t> start = ItemBytes(edited, ref);
+    typing_now_ = false;
+    typed_finished_ = false;
+    const bool proposed = NumberControl(ui, key.c_str(), &value, range, drag_speed, changed ? FieldStyle::kChanged : FieldStyle::kClean);
+    if (typing_now_) {
+        if (!typing_.Is(ref, key)) typing_.Begin(ref, key, range, start);
+        if (typed_finished_) {
+            typing_.Finish(edited, number_buffer_);
+        } else {
+            typing_.Update(edited, number_buffer_);
+        }
+    } else if (proposed) {
+        SetItemField(edited, ref, key, value);
+    }
+    if (const std::optional<int> after = ItemFieldValue(edited, ref, key)) visible_.push_back({ref, key, *after});
+}
+
+bool EditorPage::PrepareInventorySave(trg::Ui& ui) {
+    if (!edit_) return true;
+    if (typing_.Active()) {
+        if (!ExactTypedNumber(number_buffer_, typing_.range())) {
+            ui.SetStatus(Tr("Finish or correct the number you are typing before applying."), 6.0);
+            return false;
+        }
+        typing_.Finish(edit_->working(), number_buffer_);
+        typed_.Clear();
+    }
+    if (ImGui::GetFrameCount() - visible_frame_ > 2) return true;
+    const std::optional<UiMismatch> mismatch = FindUiMismatch(edit_->working(), visible_);
+    if (mismatch) {
+        ui.SetStatus(Tr("The editor values and the item are out of sync; nothing was saved."), 8.0);
+        return false;
+    }
+    return true;
 }
 
 void EditorPage::DrawCharacterList(trg::Ui& ui) {
@@ -541,7 +685,7 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
     const CharacterView& character = *SelectedCharacter();
     const CharacterView* saved = PersistedCharacter();
     const float scale = ui.scale();
-    if (TitleWithButton(ui, Tr("Character Editor"), Tr("Back to Characters"))) {
+    if (TitleWithButton(ui, Tr("Character Editor"), Tr("Back to Characters"), ButtonIcon::kBack)) {
         nav_.Back();
         return;
     }
@@ -564,13 +708,20 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
             ImVec2(portrait_min.x + layout.portrait, portrait_min.y + layout.portrait));
     DrawIdentity(ui, ImVec2(origin.x + layout.portrait + gap, origin.y), identity, layout.height);
     ImGui::Dummy(ImVec2(layout.portrait + gap + text_size.x, layout.height));
+    const SummaryButtons buttons = SplitSummaryButtons(layout, spacing);
     ImGui::SameLine(row_start + layout.button_x);
     ImGui::BeginGroup();
     ImGui::Dummy(ImVec2(0.0f, std::max(0.0f, layout.button_y - ImGui::GetStyle().ItemSpacing.y)));
-    const bool edit_appearance = ImGui::Button(Tr("Edit Appearance"), ImVec2(layout.button_width, layout.button_height));
+    const bool edit_appearance = IconButton(Tr("Edit Appearance"), [this](int pixels) { return ButtonIconTexture(ButtonIcon::kAppearance, pixels); }, ImVec2(buttons.width, layout.button_height));
+    ImGui::SameLine(0.0f, spacing);
+    const bool edit_inventory = IconButton(Tr("Edit Inventory"), [this](int pixels) { return ButtonIconTexture(ButtonIcon::kInventory, pixels); }, ImVec2(buttons.width, layout.button_height));
     ImGui::EndGroup();
     if (edit_appearance) {
         RequestAppearance();
+        return;
+    }
+    if (edit_inventory) {
+        RequestInventory();
         return;
     }
     if (appearance_failed_) {
@@ -596,6 +747,8 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         ImGui::PopStyleColor();
     }
 
+    DrawDifficulty(ui, character, saved && saved->difficulty != character.difficulty);
+
     ui.Row(Tr("Level"));
     int level = SaveModel::DisplayedLevel(character.level_stored);
     const bool level_changed = saved && saved->level_stored != character.level_stored;
@@ -610,6 +763,36 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
         edit_->working().SetSkillPoints(selected_slot_, selected_character_, skill_points);
     }
 
+    const DataSlotView* data_slot = SelectedSlot();
+    const DataSlotView* saved_data_slot = edit_ ? edit_->persisted().Slot(selected_slot_) : nullptr;
+    ui.Row(Tr("Gold"), Tr("Gold belongs to this save data"));
+    int gold = data_slot ? int(data_slot->gold) : 0;
+    const bool gold_changed = saved_data_slot && data_slot && saved_data_slot->gold != data_slot->gold;
+    if (NumberControl(ui, "gold", &gold, kGoldRange, 0.25f, changed_style(gold_changed), true)) {
+        edit_->working().SetGold(selected_slot_, uint32_t(gold));
+    }
+
+    ui.Heading(Tr("Stats"));
+
+    const std::optional<CustomKey> key = CurrentKey();
+    const std::optional<CharacterOverride> saved_override = key ? override_saved_.Get(*key) : std::nullopt;
+    const auto override_field_changed = [&](uint16_t field) {
+        if (!key) return false;
+        const std::optional<CharacterOverride> current = override_working_.Get(*key);
+        const bool before = saved_override && saved_override->Has(field);
+        const bool now = current && current->Has(field);
+        if (before != now) return true;
+        return before && current->Value(field) != saved_override->Value(field);
+    };
+    const auto set_override_field = [&](uint16_t field, uint16_t value, bool clear_when_native) {
+        if (!key) return;
+        CharacterOverride next = override_working_.Get(*key).value_or(CharacterOverride{});
+        if (clear_when_native) next.Clear(field);
+        else next.Set(field, value);
+        if (next.Any()) override_working_.Set(*key, next);
+        else override_working_.Clear(*key);
+    };
+
     const HpValues hp{character.hp_current, character.hp_max};
     ui.Row(Tr("Current HP"));
     int hp_current = hp.current;
@@ -621,12 +804,61 @@ void EditorPage::DrawCharacterEditor(trg::Ui& ui) {
 
     ui.Row(Tr("Max HP"));
     int hp_max = hp.max;
-    const bool hp_max_changed = saved && saved->hp_max != character.hp_max;
+    const bool hp_max_changed = (saved && saved->hp_max != character.hp_max) || override_field_changed(CHARACTER_OVERRIDE_MAX_HP);
     if (NumberControl(ui, "hp_max", &hp_max, kHpRange, 0.25f, changed_style(hp_max_changed))) {
         const HpValues next = WithMaxHp(hp, hp_max);
         edit_->working().SetHp(selected_slot_, selected_character_, uint16_t(next.current), uint16_t(next.max));
+        const bool was_native = !saved_override || !saved_override->Has(CHARACTER_OVERRIDE_MAX_HP);
+        set_override_field(CHARACTER_OVERRIDE_MAX_HP, uint16_t(next.max),
+                           next.max == 0 || (was_native && saved && next.max == saved->hp_max));
     }
+
+    const auto stat_row = [&](const char* label, const char* id, uint16_t field, uint16_t CharacterStats::*member) {
+        ui.Row(label);
+        int value = character.stats.*member;
+        const bool changed = (saved && saved->stats.*member != character.stats.*member) || override_field_changed(field);
+        if (!NumberControl(ui, id, &value, kCharacterStatRange, 0.25f, changed_style(changed))) return;
+        CharacterStats stats = character.stats;
+        stats.*member = uint16_t(value);
+        edit_->working().SetStats(selected_slot_, selected_character_, stats);
+        const bool was_native = !saved_override || !saved_override->Has(field);
+        set_override_field(field, uint16_t(value), was_native && saved && uint16_t(value) == saved->stats.*member);
+    };
+
+    stat_row(Tr("STR (Strength)"), "stat_strength", CHARACTER_OVERRIDE_STRENGTH, &CharacterStats::strength);
+    stat_row(Tr("CON (Constitution)"), "stat_constitution", CHARACTER_OVERRIDE_CONSTITUTION,
+             &CharacterStats::constitution);
+    stat_row(Tr("DEX (Dexterity)"), "stat_dexterity", CHARACTER_OVERRIDE_DEXTERITY, &CharacterStats::dexterity);
+    stat_row(Tr("INT (Intelligence)"), "stat_intelligence", CHARACTER_OVERRIDE_INTELLIGENCE,
+             &CharacterStats::intelligence);
+    stat_row(Tr("MGR (Magic Resistance)"), "stat_magic_resistance", CHARACTER_OVERRIDE_MAGIC_RESISTANCE,
+             &CharacterStats::magic_resistance);
+    stat_row(Tr("LUC (Luck)"), "stat_luck", CHARACTER_OVERRIDE_LUCK, &CharacterStats::luck);
     ui.EndRows();
+}
+
+void EditorPage::DrawDifficulty(trg::Ui& ui, const CharacterView& character, bool changed) {
+    ui.Row(Tr("Difficulty"), Tr("Difficulty belongs to this character and can be changed here"));
+    const std::string_view name = DifficultyName(character.difficulty);
+    const std::string current = name.empty() ? std::string(Tr("Unknown")) : std::string(Tr(std::string(name).c_str()));
+    if (changed) {
+        ImGui::PushStyleColor(ImGuiCol_Border, ui.theme().accent);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    }
+    if (ImGui::BeginCombo("##difficulty", current.c_str())) {
+        for (const uint8_t value : kEditableDifficulties) {
+            const bool selected = value == character.difficulty;
+            const std::string label = std::string(Tr(std::string(DifficultyName(value)).c_str())) + "##difficulty" + std::to_string(value);
+            if (ImGui::Selectable(label.c_str(), selected) && !selected) {
+                edit_->working().SetDifficulty(selected_slot_, selected_character_, value);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (changed) {
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+    }
 }
 
 void EditorPage::DrawCharacter(trg::Ui& ui) {
@@ -643,6 +875,10 @@ void EditorPage::DrawCharacter(trg::Ui& ui) {
     }
     if (nav_.appearance()) {
         DrawAppearance(ui);
+        return;
+    }
+    if (nav_.inventory()) {
+        DrawInventory(ui);
         return;
     }
     if (nav_.editing()) {
@@ -666,13 +902,17 @@ void EditorPage::DrawCharacter(trg::Ui& ui) {
 }
 
 // The title, then its button right after it on the same line.
-bool EditorPage::TitleWithButton(trg::Ui& ui, const char* title, const char* button) {
+bool EditorPage::TitleWithButton(trg::Ui& ui, const char* title, const char* button, ButtonIcon icon) {
     ImGui::AlignTextToFramePadding();
     ImGui::PushFont(ui.fonts().semibold, ImGui::GetFontSize());
     ImGui::TextUnformatted(title);
     ImGui::PopFont();
     ImGui::SameLine();
-    return ImGui::Button(button);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float height = ImGui::GetFrameHeight();
+    const float glyph = float(std::max(1, int(std::lround(height * 0.5f))));
+    const ImVec2 size(ImGui::CalcTextSize(button).x + glyph + style.ItemInnerSpacing.x + style.FramePadding.x * 2.0f, height);
+    return IconButton(button, [this, icon](int pixels) { return ButtonIconTexture(icon, pixels); }, size);
 }
 
 void EditorPage::RequestAppearance() {
@@ -790,7 +1030,7 @@ void EditorPage::DrawAppearance(trg::Ui& ui) {
         ui.Help(Tr("Select a character first."));
         return;
     }
-    if (TitleWithButton(ui, Tr("Appearance"), Tr("Back to Character Editor"))) {
+    if (TitleWithButton(ui, Tr("Appearance"), Tr("Back to Character Editor"), ButtonIcon::kBack)) {
         nav_.BackToCharacter();
         return;
     }

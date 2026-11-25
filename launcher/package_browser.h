@@ -18,8 +18,10 @@ namespace dcp {
 class PackageBrowser {
 public:
     // A package starts at the folder that holds a .pkg (the program's folder, Downloads, a drive...), else the program's
-    // folder; a game folder starts where the player last was, else at Home.
-    void Open(const std::filesystem::path& program_folder, InstallSource source = InstallSource::kPackage);
+    // folder; a game folder starts where the player last was, else at Home. `title` and `hint` replace the install
+    // wording (English, drawn through Tr) for other folder choices.
+    void Open(const std::filesystem::path& program_folder, InstallSource source = InstallSource::kPackage,
+              std::string title = {}, std::string hint = {});
     bool active() const { return active_; }
 
     // Draws the window while it is open; returns the file, or the folder, once the player chose one. `font` is nullptr
@@ -34,6 +36,8 @@ private:
     bool focus_list_ = false;
     bool show_all_ = false;
     InstallSource source_ = InstallSource::kPackage;
+    std::string title_;
+    std::string hint_;
     std::filesystem::path folder_;
     std::vector<Place> places_;
     FolderListing listing_;

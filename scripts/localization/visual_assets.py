@@ -109,6 +109,11 @@ def portuguese_interface():
     return treasure_rank.apply(INTERFACE_FR.read_bytes())
 
 
+def portuguese_manual(number, usa_source, marcelo_target):
+    import manual_repairs
+    return manual_repairs.apply(number, usa_source, marcelo_target)
+
+
 def portuguese_layout(mirror, data):
     import treasure_rank
     if mirror['target'] != 'stage/Interface_US.mbs':
@@ -225,9 +230,40 @@ def xbox_patched(original, target):
     return bytes(data)
 
 
-def build():
+def build(manuals_only=False):
     cpk = Cpk(ARCHIVE)
     rows = original_entries(cpk)
+    VISUAL.mkdir(parents=True, exist_ok=True)
+    assets = []
+
+    def add(family, patch_name, source_label, target_label, source_bytes, target_bytes, dimensions=''):
+        data, runs = dcpx_bytes(target_label, source_bytes, target_bytes)
+        path = VISUAL / (patch_name + '.z')
+        path.write_bytes(pack_patch(data))
+        assets.append({
+            'family': family, 'asset_type': 'FTX/GNF texture pack', 'format': 'FTX container, GNF subresources',
+            'patch': str(path.relative_to(REPO)), 'patch_size': path.stat().st_size,
+            'destination': target_label, 'source': source_label, 'source_size': len(source_bytes),
+            'source_crc32': f'{crc32(source_bytes):08x}', 'source_sha256': sha256(source_bytes),
+            'replacement_size': len(target_bytes), 'replacement_crc32': f'{crc32(target_bytes):08x}',
+            'replacement_sha256': sha256(target_bytes), 'runs': runs, 'dimensions': dimensions,
+            'compression': 'DCPX 16-byte deltas, zlib-compressed on disk',
+            'status': 'integrated'})
+        return path
+
+    if manuals_only:
+        manual_png = {p.stem: png_size(p) for p in (IMAGES / 'manual_paginas').glob('*.png')}
+        for number, (source_path, target_label) in enumerate(MANUALS, 1):
+            source = read_archive(cpk, target_label)
+            target = portuguese_manual(number, source, source_path.read_bytes())
+            if len(source) != len(target) or ftx_structure(source) != ftx_structure(target):
+                raise SystemExit(f'{target_label}: replacement does not match the USA manual structure')
+            dims = manual_png.get(f'manual_pt_{number:03d}')
+            add('manual', f'manual-us-{number:03d}.dcpx', target_label, target_label, source, target,
+                f'{dims[0]}x{dims[1]}' if dims else '')
+        print(f'{len(assets)} manual patches in {VISUAL}')
+        return 0
+
     original_interface = original_data(cpk, rows, 'stage/Interface_US.ftx')
     current_interface = read_archive(cpk, 'stage/Interface_US.ftx')
     if sha256(original_interface) != INTERFACE_SHA256 or crc32(original_interface) != INTERFACE_CRC32:
@@ -260,24 +296,6 @@ def build():
                     for offset, _ in xbox['runs']):
         raise SystemExit('the combined Interface does not preserve the Xbox prompt blocks')
 
-    VISUAL.mkdir(parents=True, exist_ok=True)
-    assets = []
-
-    def add(family, patch_name, source_label, target_label, source_bytes, target_bytes, dimensions=''):
-        data, runs = dcpx_bytes(target_label, source_bytes, target_bytes)
-        path = VISUAL / (patch_name + '.z')
-        path.write_bytes(pack_patch(data))
-        assets.append({
-            'family': family, 'asset_type': 'FTX/GNF texture pack', 'format': 'FTX container, GNF subresources',
-            'patch': str(path.relative_to(REPO)), 'patch_size': path.stat().st_size,
-            'destination': target_label, 'source': source_label, 'source_size': len(source_bytes),
-            'source_crc32': f'{crc32(source_bytes):08x}', 'source_sha256': sha256(source_bytes),
-            'replacement_size': len(target_bytes), 'replacement_crc32': f'{crc32(target_bytes):08x}',
-            'replacement_sha256': sha256(target_bytes), 'runs': runs, 'dimensions': dimensions,
-            'compression': 'DCPX 16-byte deltas, zlib-compressed on disk',
-            'status': 'integrated'})
-        return path
-
     for stale in VISUAL.glob('*.dcpx'):
         stale.unlink()
 
@@ -291,7 +309,7 @@ def build():
     manual_png = {p.stem: png_size(p) for p in (IMAGES / 'manual_paginas').glob('*.png')}
     for number, (source_path, target_label) in enumerate(MANUALS, 1):
         source = read_archive(cpk, target_label)
-        target = source_path.read_bytes()
+        target = portuguese_manual(number, source, source_path.read_bytes())
         if len(source) != len(target) or ftx_structure(source) != ftx_structure(target):
             raise SystemExit(f'{target_label}: replacement does not match the USA manual structure')
         dims = manual_png.get(f'manual_pt_{number:03d}')
@@ -343,32 +361,45 @@ def build():
     return 0
 
 
-def validate():
+def validate(manuals_only=False):
     cpk = Cpk(ARCHIVE)
-    rows = original_entries(cpk)
-    original_interface = original_data(cpk, rows, 'stage/Interface_US.ftx')
-    current_interface = read_archive(cpk, 'stage/Interface_US.ftx')
-    pt_interface = portuguese_interface()
-    title_source = read_archive(cpk, 'stage/title_US.ftx')
-    pt_title = TITLE_FR.read_bytes()
-    interface_runs = [(i, pt_interface[i:i + 16]) for i in range(0, len(original_interface), 16)
-                      if original_interface[i:i + 16] != pt_interface[i:i + 16]]
-    xbox = xbox_interface()
-    xbox_base = xbox_patched(original_interface, xbox) if xbox else original_interface
-    combined_interface = bytearray(xbox_base)
-    for offset, data in interface_runs:
-        combined_interface[offset:offset + 16] = data
-    expected = {
-        'interface-us.dcpx': (original_interface, pt_interface),
-        'interface-us-xbox.dcpx': (xbox_base, bytes(combined_interface)),
-        'title-us.dcpx': (title_source, pt_title),
-    }
-    for source_path, target_label in MANUALS:
-        expected[f'manual-us-{source_path.stem[-3:]}.dcpx'] = (read_archive(cpk, target_label), source_path.read_bytes())
+    expected = {}
+    current = {}
+    if not manuals_only:
+        rows = original_entries(cpk)
+        original_interface = original_data(cpk, rows, 'stage/Interface_US.ftx')
+        current_interface = read_archive(cpk, 'stage/Interface_US.ftx')
+        pt_interface = portuguese_interface()
+        title_source = read_archive(cpk, 'stage/title_US.ftx')
+        pt_title = TITLE_FR.read_bytes()
+        interface_runs = [(i, pt_interface[i:i + 16]) for i in range(0, len(original_interface), 16)
+                          if original_interface[i:i + 16] != pt_interface[i:i + 16]]
+        xbox = xbox_interface()
+        xbox_base = xbox_patched(original_interface, xbox) if xbox else original_interface
+        combined_interface = bytearray(xbox_base)
+        for offset, data in interface_runs:
+            combined_interface[offset:offset + 16] = data
+        expected.update({
+            'interface-us.dcpx': (original_interface, pt_interface),
+            'interface-us-xbox.dcpx': (xbox_base, bytes(combined_interface)),
+            'title-us.dcpx': (title_source, pt_title),
+        })
+        current.update({
+            'interface-us.dcpx': current_interface,
+            'interface-us-xbox.dcpx': current_interface,
+            'title-us.dcpx': title_source,
+        })
+    for number, (source_path, target_label) in enumerate(MANUALS, 1):
+        usa = read_archive(cpk, target_label)
+        repaired = portuguese_manual(number, usa, source_path.read_bytes())
+        expected[f'manual-us-{number:03d}.dcpx'] = (usa, repaired)
+        current[f'manual-us-{number:03d}.dcpx'] = usa
 
     errors = []
     seen = {}
-    patches = sorted(VISUAL.glob('*.dcpx.z'))
+    patches = [p for p in sorted(VISUAL.glob('*.dcpx.z')) if not p.name.startswith('base-')]
+    if manuals_only:
+        patches = [p for p in patches if p.name.startswith('manual-us-')]
     for path in patches:
         name = path.name[:-2]
         try:
@@ -403,13 +434,6 @@ def validate():
         print(f'{path.name}: {target["name"]}, source {target["before"]:08x}, result {target["after"]:08x}, '
               f'{"ok" if result is not None else "FAILED"}')
 
-    current = {
-        'interface-us.dcpx': current_interface,
-        'interface-us-xbox.dcpx': current_interface,
-        'title-us.dcpx': title_source,
-    }
-    for source_path, target_label in MANUALS:
-        current[f'manual-us-{source_path.stem[-3:]}.dcpx'] = read_archive(cpk, target_label)
     applied = {}
     for path in patches:
         target = parse_dcpx(unpack_patch(path.read_bytes()))[0]
@@ -421,17 +445,18 @@ def validate():
         result = apply_patch(source, target)
         if result is not None:
             applied[target['name']] = result
-    for mirror in MBS_MIRRORS:
-        data = read_archive(cpk, mirror['source'])
-        if sha256(data) != mirror['sha256']:
-            errors.append(f'{mirror["source"]}: unexpected source hash')
-            continue
-        old = mirror['name'].encode('ascii')
-        if data.count(old) != 1:
-            errors.append(f'{mirror["source"]}: embedded name not found once')
-            continue
-        data = portuguese_layout(mirror, data.replace(old, Path(mirror['target']).name.encode('ascii')))
-        applied[mirror['target']] = data
+    if not manuals_only:
+        for mirror in MBS_MIRRORS:
+            data = read_archive(cpk, mirror['source'])
+            if sha256(data) != mirror['sha256']:
+                errors.append(f'{mirror["source"]}: unexpected source hash')
+                continue
+            old = mirror['name'].encode('ascii')
+            if data.count(old) != 1:
+                errors.append(f'{mirror["source"]}: embedded name not found once')
+                continue
+            data = portuguese_layout(mirror, data.replace(old, Path(mirror['target']).name.encode('ascii')))
+            applied[mirror['target']] = data
     for name in applied:
         if cpk.find(name) is None:
             errors.append(f'{name}: destination is not in the USA archive')
@@ -448,11 +473,12 @@ def validate():
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('command', choices=('build', 'validate', 'inventory'))
+    parser.add_argument('--manuals-only', action='store_true')
     args = parser.parse_args()
     if args.command == 'build':
-        return build()
+        return build(manuals_only=args.manuals_only)
     if args.command == 'validate':
-        return validate()
+        return validate(manuals_only=args.manuals_only)
     print(json.dumps(inventory(), indent=1))
     return 0
 

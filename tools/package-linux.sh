@@ -44,7 +44,7 @@ excluded='^(ld-linux.*|libc|libm|libdl|librt|libpthread|libresolv|libutil|libnsl
 compat_libs='^(libstdc\+\+|libgcc_s)\.so'
 
 forbidden_names='^(game|user|logs|cache|build|prepared|extracted|image|trophy|sce_sys|sce_module|eboot\.bin|param\.sfo|dcp\.ini|boot\.bin|content\.bin|image\.json|imports\.json|symbols)$'
-forbidden_patterns='\.(pkg|pdb|debug|log|dmp|ini|bin|self|sprx|prx|elf|cpk|sfo|json|trp|spv|pipeline_cache|o|a|tmp|bak|sav|py|ps1|c|cpp|h)$'
+forbidden_patterns='\.(pkg|pdb|debug|log|dmp|ini|bin|self|sprx|prx|elf|cpk|sfo|json|trp|spv|pipeline_cache|o|a|tmp|bak|sav|dat|cache|py|ps1|c|cpp|h)$'
 glibc_parts='^(ld-linux.*|libc|libm|libdl|libpthread|librt|libresolv|libutil|libmvec|libanl|libnsl|libBrokenLocale|libthread_db|libnss_.*)\.so'
 
 newer_than() { [[ $1 != "$2" && $(printf '%s\n' "$1" "$2" | sort -V | tail -1) == "$1" ]]; }
@@ -92,9 +92,9 @@ check_appdir() { # dir [the AppImage file, whose runtime is an ELF too]
         fi
     done < <(find "$dir" -mindepth 1 -print0)
     for leaf in AppRun "$desktop_file" dragons-crown-pro-pc.png usr/bin/dragons_crown_pro \
-                usr/bin/assets/launcher/header-art.png usr/bin/assets/launcher/sponsor-heart.png \
+                usr/bin/assets/launcher/header-art.png usr/bin/assets/launcher/home_background.png usr/bin/assets/launcher/sponsor-heart.png \
                 usr/share/licenses/DragonsCrownProPC/THIRD-PARTY-LICENSES.txt \
-                usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/doc/DragonsCrownProPC/README.txt; do
+                usr/share/licenses/DragonsCrownProPC/NotoSansTC/LICENSE-NotoSansTC.txt usr/share/licenses/DragonsCrownProPC/NotoSansKR/LICENSE-NotoSansKR.txt usr/share/doc/DragonsCrownProPC/README.txt; do
         [[ -e $dir/$leaf ]] || problem "missing: $leaf"
     done
     local missing
@@ -147,6 +147,7 @@ chmod 755 "$appdir/usr/bin/dragons_crown_pro"
 step 'Staging the launcher images'
 install -d "$appdir/usr/bin/assets/launcher"
 install -m644 assets/launcher/header-art.png "$appdir/usr/bin/assets/launcher/header-art.png"
+install -m644 assets/launcher/home_background.png "$appdir/usr/bin/assets/launcher/home_background.png"
 install -m644 assets/launcher/sponsor-heart.png "$appdir/usr/bin/assets/launcher/sponsor-heart.png"
 
 step 'Staging the libraries it loads'
@@ -204,7 +205,7 @@ declare -A built_in=(
     [shadPS4]=gpu/shadps4/LICENSE [sirit]=gpu/third_party/sirit/LICENSE.txt
     [SPIRV-Headers]=gpu/third_party/sirit/externals/SPIRV-Headers/LICENSE [half]=gpu/third_party/half/LICENSE.txt
     [SMAA]=gpu/shadps4/video_core/host_shaders/smaa/LICENSE.txt [DejaVu]=gpu/third_party/fonts/LICENSE-DejaVu.txt
-    [NotoSans]=third_party/fonts/LICENSE-NotoSans.txt [NotoSansTC]=third_party/fonts/LICENSE-NotoSansTC.txt
+    [NotoSans]=third_party/fonts/LICENSE-NotoSans.txt [NotoSansTC]=third_party/fonts/LICENSE-NotoSansTC.txt [NotoSansKR]=third_party/fonts/LICENSE-NotoSansKR.txt
     [imgui]=gpu/third_party/imgui/LICENSE.txt [magic_enum]=gpu/third_party/magic_enum/LICENSE
     [miniz]=gpu/third_party/miniz/LICENSE [nanosvg]=launcher/third_party/nanosvg/LICENSE.txt
     [xbyak]=gpu/third_party/xbyak/COPYRIGHT)

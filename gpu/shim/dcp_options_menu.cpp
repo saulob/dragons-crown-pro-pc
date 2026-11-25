@@ -83,7 +83,7 @@ std::vector<Info> Hotkeys() {
     return {{dcp::Tr("Options menu"), KeyName(DcpOptions::kKey) + "  /  L3 + R3"},
             {dcp::Tr("Cheats menu"), KeyName(settings.menu_key)},
             {dcp::Tr("Display mode"), KeyName(settings.window_mode_key)},
-            {dcp::Tr("Comms Wheel"), KeyName(settings.comms_key)},
+            {dcp::Tr("Comms Wheel"), DcpOptions::CommsWheelHotkeyText(KeyName(settings.comms_key), settings.comms_wheel_chord)},
             {dcp::Tr("Exit Game"), DcpOptions::ExitGameHotkeyText(KeyName(settings.exit_key), settings.controller_exit_shortcut)},
             {dcp::Tr("Frame counter"), KeyName(DcpPing::kFpsKey)},
             {dcp::Tr("Ping (Online Play)"), KeyName(DcpPing::kPingKey)}};

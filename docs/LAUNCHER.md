@@ -234,6 +234,58 @@ piped (`dragons_crown_pro.exe --check-game | Out-Host`) or, otherwise, the paren
 Windows GUI executable, a shell does not wait for it: to read the exit code use `Start-Process -Wait -PassThru` (PowerShell) or
 `start /wait` (cmd).
 
+## Home
+
+Home is the first sidebar page and the page the launcher opens on: the project in numbers, and a quick start.
+
+- **Hero**: three lifetime totals side by side, each with an icon, and PLAY, ONLINE LOBBY and MANAGE GAME on the right.
+  They wrap or shrink at narrow widths.
+- **Downloads**: the sum of `download_count` over the assets of every published GitHub release of
+  `saulob/dragons-crown-pro-pc` (drafts are skipped; `.sha256`, `.sha512`, `.sha1`, `.md5`, `.sig`, `.asc`, `.minisig`
+  files and `SHA256SUMS`/`CHECKSUMS` manifests are not downloads). It is cached for 30 minutes in
+  `user/home_stats.cache`, and an earlier value stays shown while GitHub cannot be reached. It does not depend on the
+  online service.
+- **Online sessions since launch** (`lifetime.sessions`): the sum of the dashboard's Sessions over every day the service
+  has kept, so a reconnect inside the 10-minute window is still the same session. **Players since launch**
+  (`lifetime.players`): the number of distinct online accounts the service has registered, one per account however
+  often it connects. Both come from the same `/stats` request, and a service without them shows dashes while
+  Downloads and everything else still work.
+- **Right now**: Players online now, Players playing online, Open online games and Peak players today. **Today**: Online
+  sessions today, Online games created today and Players joined today. **Last 30 days**: Multiplayer sessions. They
+  come from the online service's anonymous aggregate statistics, `GET /stats` (server/lobby/README.md), and are the
+  dashboard's own counters under player-facing names:
+
+  | Home | `/stats` field | Dashboard |
+  |---|---|---|
+  | Players online now | `live.online` | Online now |
+  | Players playing online | `live.in_rooms` | In rooms (players holding a seat in an online game) |
+  | Open online games | `live.open_rooms` | Open rooms |
+  | Peak players today | `live.peak_today` | Peak today |
+  | Online sessions today | `today.sessions` | Sessions today |
+  | Online games created today | `today.rooms_created` | Rooms today |
+  | Players joined today | `today.joins` | Joins today (not unique players) |
+  | Multiplayer sessions | `last_30_days.rooms_with_guest` | Rooms with a guest, 30 days: online games that ended with at least one guest in them |
+
+  A number the service cannot read is a dash, never zero, and the page says "Live statistics unavailable" until the whole
+  answer is complete. One request fills every number; it is repeated at most once a minute while Home is shown, and not
+  at all while another page is open (five minutes after a failure).
+- **Most played classes**: the classes of the party snapshots clients reported in the last 30 days (the dashboard's
+  "Characters in parties"), most played first, up to six, each with its share. It counts class appearances in reported
+  multiplayer parties, not unique players. Every face is the one the Editor shows, rendered from the installed game's
+  archives on a worker thread (`launcher/home_portraits.cpp`, the Editor's `CharacterArt`). Without a readable game the
+  classes are listed as text only.
+- **PLAY** is the footer's PLAY. Without a ready game the button is **INSTALL GAME** and opens Play. **ONLINE LOBBY**
+  opens the Online page, where the Lobby is; **MANAGE GAME** opens Play. Play stays the page for installing, reinstalling
+  and Show this launcher.
+- The artwork behind the page (`assets/launcher/home_background.png`) is drawn only inside Home's content panel, by the
+  page backdrop hook that `gpu/patches/trg-launcher/0018-page-backdrop.patch` adds to TRG Launcher. It is cropped to
+  the panel anchored to the right so the kingdom stays in view, scaled to the exact pixels shown, and darkened more on
+  the left, where the numbers are (`launcher/home_art.h`). Without the file the panel is plain.
+
+Reading these numbers is a plain HTTPS request off the UI thread: it never turns on Online play, never signs in, never
+lists you in the Lobby, never creates a session or counts as Online now, and does not change any setting. Without a
+network Home shows the last known downloads and dashes for the rest; PLAY works either way.
+
 ## Save and Play
 
 - **Save** writes the pending settings and keeps the launcher open. **Quit** closes without saving.
@@ -310,6 +362,9 @@ use the same defaults).
 | `controller_rumble` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `controller_exit_shortcut` | 1, 0 | 1 | at game start; L1 + R1 + Options held 2 seconds on one controller closes the game |
 | `hotkey_exit_game` | a key name | `f9` | at game start; closes the game like the title's Exit Game row |
+| `hotkey_character_highlight` | a key name | `f7` | at game start; toggles Character Highlight for the primary local player |
+| `controller_character_highlight` | `back+r3`, `back+l3`, `l1+r3`, `r1+l3`, `off` | `back+r3` | at game start; this chord on a controller toggles Character Highlight for the player that controller drives |
+| `controller_comms_wheel` | `back+dpad_up`, `l1+dpad_up`, `r1+dpad_up`, `dpad_up`, `off` | `back+dpad_up` | at game start; controller shortcut that opens the Comms Wheel in online rooms |
 | `mouse_controls` | 1, 0 | 1 | at game start; F1 changes it at once |
 | `story_skip_offer`, `tutorial_skip_offer` | 1, 0 | 0 | at game start |
 | `unlock_gallery` | 1, 0 | 0 | at game start |
@@ -444,10 +499,10 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
 
   | Build | Languages |
   | --- | --- |
-  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA10454 1.00, 1.01 USA | English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `korean`, `brazilian_portuguese`, `russian`, `spanish`) |
   | CUSA07001 1.00, 1.02, 1.03 Japan | Japanese, English, Portuguese (Brazil), Russian (`japanese`, `english`, `brazilian_portuguese`, `russian`): the executable does not read the system language |
   | CUSA10209 1.00, 1.02 Asia/Hong Kong | Traditional Chinese, Korean, English, Portuguese (Brazil), Russian (`traditional_chinese`, `korean`, `english`, `brazilian_portuguese`, `russian`) |
-  | CUSA10487 1.03 Europe | English, French, German, Italian, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `brazilian_portuguese`, `russian`, `spanish`) |
+  | CUSA10487 1.03 Europe | English, French, German, Italian, Korean, Portuguese (Brazil), Russian, Spanish (`english`, `french`, `german`, `italian`, `korean`, `brazilian_portuguese`, `russian`, `spanish`) |
 
   Portuguese (Brazil) is the port's own translation, not a language of the game, so it is offered on every supported
   build and a saved choice survives switching builds. The game runs in a native slot and the port serves translated
@@ -517,11 +572,27 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   fonts have Cyrillic in every region. The launcher, the F1 options, the F10 overlay and the online screens stay in
   English: the fan translation has no text for them. Exit Game shows `Выйти`. See `localization/ru/README.md`.
 
+  Korean on the USA and European builds is the game's official Korean translation, contributed by dyumadel
+  ([PR #87](https://github.com/saulob/dragons-crown-pro-pc/pull/87)), built into the port from `localization/ko`. Its
+  message sheets are the USA ones record for record, so each USA record takes the Korean at its index (11,953 records in
+  13 sheets; the 39 challenge quests the Korean release never translated and the staff roll stay in English). It is
+  served over the English slot like Portuguese (Brazil), and, as for Russian, a record must share only the slot's printf
+  conversions and buttons. The USA and European fonts have no Hangul: `launcher/hangul_font.cpp` draws the 1,075
+  syllables the text uses (drawn with Noto Sans CJK KR) into atlas cells only a kanji uses, as the official Korean font
+  puts its Hangul where the Japanese font has kanji, and `src/hangul_glyphs.c` adds their code pages (U+AC00–U+D7A3) to
+  the executable's glyph table after proving every such cell is listed by kanji only. When the glyph file, the font or
+  the table cannot take them, Korean is not served at all: the launcher says why and the game keeps its English text
+  (`Menu & Subtitles: Korean unavailable (...)`); no missing squares are ever shown. The character messages are drawn by
+  the system font: while Korean is selected, the European set opens the embedded Noto Sans KR instead of Noto Sans. Every
+  other language, system font set and the Asia/Hong Kong build's native Korean are unaffected. The launcher, the F1
+  options, the F10 overlay and the online screens stay in English; the Korean release has no text for them. See
+  `localization/ko/README.md`.
+
   For the USA, Asia/Hong Kong and European builds the list is read from the installed regional archive (`DRACRO_US.CPK`,
   `DRACRO_CK.CPK`, `DRACRO_EU.CPK`): a language is offered only when the archive holds its set of message sheets and stage files. Russian
   is offered wherever the native slot is complete, like Portuguese (Brazil); the 1.01 update's own Russian text in its
   US slot is not taken over (see USA builds). `DRACRO_EU.CPK` has a UK slot beside the US one, as `DRACRO_US.CPK` does; it is
-  not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. Korean is not yet tested in game. A saved
+  not offered as a separate language. When the archive cannot be read or holds no set, the build's list stands. A saved
   language the installed game does not have is replaced by its first one, and the log says so
   (`Settings: saved language Korean unavailable for this build, using Japanese`). An explicit `DCP_LANGUAGE`
   environment variable (a PS4 language number) overrides it. It never changes the spoken voices: Voice Language does.
@@ -705,7 +776,7 @@ Xbox controllers work without setup; the keyboard is always on. SDL offers a dev
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
-The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu, Window mode, Comms Wheel and Exit Game keys (F9 by default). A third section, **Controller shortcuts**, lists the fixed L3 + R3 Options menu chord and has the **Controller Exit Shortcut** setting (On by default): hold L1 + R1 + Options on one controller for 2 seconds to close the game. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu, Window mode, Comms Wheel, Exit Game and Character Highlight keys (Exit Game F9 and Character Highlight F7 by default). A third section, **Controller shortcuts**, lists the fixed L3 + R3 Options menu chord, **Controller Exit Shortcut** (On by default: hold L1 + R1 + Options on one controller for 2 seconds to close the game), **Controller Comms Wheel Shortcut** (`View / Back + D-pad Up` by default, or `L1 + D-pad Up`, `R1 + D-pad Up`, legacy `D-pad Up`, or `Off`), and **Character Highlight**. Click a keyboard row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. The controller shortcuts are choices on their rows. **Reset to defaults** puts these keys back and changes no other setting.
 
 Exit Game shortcuts (`gpu/shim/window.cpp`, policy in `src/dcp_exit_shortcut.h`): the key closes on its press, never on a held key's repeats, and also works with the F1 and F10 menus and the game's dialogs open; typing a name never reaches it. The controller chord is judged for each controller alone, with a monotonic clock: all three buttons must stay down 2 seconds, releasing one restarts the count, and losing focus, unplugging the controller or turning the setting Off ends it; one hold gives one request. While the three are down the game sees none of them, and buttons still held afterwards stay hidden until released. Both routes call `dcpgpu_request_close()`, the function behind the title's Exit Game row, so the log shows `Exit Game: host exit scheduled` then `Exit Game: hard exit`. Neither depends on the game build, language, Online Play or Steam.
 
@@ -775,6 +846,73 @@ selected. A pack that is not the one the patch was made for is skipped and named
 An archive that is a hard link to the game folder the install was made from (same drive) first gets a file of its own,
 so that folder is never changed. If a step fails, the archive is put back as it was; an undo record that does not belong
 to the archive, or an interrupted earlier run, is detected before anything is written.
+
+## Saves
+
+Subtitle "Your SAVE0.DAT files: overview, backups, export, import and restore.". The page sits between Gameplay and Editor and
+manages whole SAVE0.DAT files; the Editor keeps characters and their appearance. `launcher/save_page_model.cpp` holds what
+the page shows and does, without ImGui; `launcher/save_page.cpp` draws it with the TRG rows.
+
+- **Installed game** names the configured build (the one the Editor uses). Only the saves of that build's Title ID are shown
+  (`SavesOfTitle`, shared with the Editor); there is no way to pick another Title ID, and without an installed game the page
+  says so. **Selected save** appears only when that Title ID has more than one save folder (SAVEDATA00, SAVEDATA01...) and
+  chooses among those; choosing only reads. The first open shows **Loading saves...**; every later entry reads the saves and
+  backups again.
+- **Overview**: Platform, Save folder, Status, CRC, DATA slots, Characters, Modified and File size. Status is Valid,
+  Unreadable, Invalid (size or magic) or Corrupt (CRC); the full path is under **Details**.
+- **DATA Slots**: read-only; each slot's characters (name, class, level) and gold, or Empty. **Open Editor** goes to the
+  Editor page, where characters are edited, when the selected save belongs to the installed game.
+- **Create backup** validates the save and copies it to `user/save_backups` as `SAVE0_<timestamp>_<title>_<folder>.DAT` with
+  a `.meta` beside it; a name that is taken gets a numbered suffix, so nothing is overwritten. The list under **Backups** shows
+  the selected save's backups, newest first.
+- **Restore...** and **Import and replace...** ask through `Ui::ConfirmRow`, naming the backup or source and the save they
+  replace. They validate the new bytes, back the current save up, write through a validated temporary file renamed over the
+  save, and read it back; any failure leaves the old save as it was. Afterwards the page reloads and the shared
+  `SaveSelection` generation changes, so the Editor reloads before it can write again.
+- **Export PS4 save...** chooses a folder (TRG has no Save File dialog) and writes `SAVE0.DAT` there byte for byte, then reads it
+  back and validates it. A file already there is replaced only after a confirmation; the save's own folder and the
+  launcher's `savedata` folder are refused, because a copy there would replace a save without its backup.
+- **Import PS4 save...** and **Import PS3 save...** are two entry points (`ImportMode::kPs4`, `ImportMode::kPs3`) into one
+  inspection and commit (`PlanImport`, `CommitImportPlan`). The PS4 mode takes a SAVE0.DAT, a folder (up to four levels
+  down) or a ZIP archive and refuses a PS3 source with "This is a PS3 save. Use Import PS3 save."; the PS3 mode takes a PS3
+  save folder or ZIP and refuses a native one with "This is a Dragon's Crown Pro save. Use Import PS4 save." The mode never
+  switches by itself. The preview (`InspectImport`) shows:
+  source and type, platform, region, Title ID, format, SAVE0.DAT status, whether a conversion is required, DATA slots,
+  characters, the save it replaces and that a backup is made first. The Title ID comes from PARAM.SFO (`SAVEDATA_DIRECTORY`
+  on PS3, `PARENT_DIRECTORY` on Vita), else from the folder names. A file is accepted only when it passes `ValidateSave`
+  (size, magic, CRC); its name alone is not enough, and several different SAVE0.DAT files in one folder or archive are
+  refused as ambiguous. A source that cannot be imported still gets its preview, with the exact reason.
+  - **PS3**: imported after an in-memory conversion. `save_ps3.cpp` reads PARAM.PFD (version 4; a 64-byte-aligned entry table whose
+    entry holds the file's logical size, an encrypted file key and an HMAC-SHA-1 of the stored bytes), checks the entry hash,
+    unwraps `SAVE0.DAT` in memory with Dragon's Crown's per-game key (the eight save-directory IDs it knows: `BLUS30767`,
+    `BLES01950`, `NPEB01836`, `NPUB31235`, `BLJM61041`, `BCAS20298`, `BCAS20290`, `BCAS20288`) and checks the result: 2,157,336
+    bytes, `DCSD` at offset 4, and a big-endian CRC-32 at offset 0. No console ID is needed. A save somebody already decrypted is
+    converted the same way. A `SAVE0.DAT` alone cannot be read (`kPs3NeedsPfd`); a PFD that is truncated, unsupported or
+    inconsistent (`kPs3PfdInvalid`), a mismatching hash (`kPs3HashMismatch`), another game's save (`kPs3UnknownTitle`) and a result
+    that is not a save (`kPs3Undecryptable`) are each reported.
+    `ConvertPs3ToPro` (`save_ps3_layout.cpp`) accepts layout version 36 only (header counts 490 and 532); any other version is
+    refused as `kPs3UnsupportedLayout`. The PS3 file is a big-endian image of the same structures the Pro game keeps, so the
+    conversion rebuilds the Pro file field by field instead of reversing the whole file: a 127-node program of leaves and
+    nested repeats describes one DATA slot (264,641 fields of one, two or four bytes), applied to the three slots; the 59 trailer
+    bytes, the six-byte struct and the play-time dword after the slots are converted by a small table; the header is the Pro
+    header (version 38, counts 660 and 979); the CRC-32 is the Pro one, little-endian. An item record's packed 32-bit word
+    (25, 4, 1, 1 and 1 bits) is re-packed because the PS3 compiler allocates bitfields from the most significant bit and Pro from
+    the least. Padding is zero: every byte the program does not name is alignment padding or a constant `0xCC` fill, and the
+    original game's own cross-save does the same. The result must pass `ValidateSave` before it is kept; the PS3 plaintext
+    and the converted save live in memory only until the import commit writes the Pro save, after the usual backup, atomically.
+  - **Vita**: accepted only when SAVE0.DAT is decrypted and passes `ValidateSave`; the preview warns that no Dragon's
+    Crown Vita save has been verified. An encrypted one is refused.
+  - **ZIP** (`save_zip.cpp`): read in memory, nothing is extracted to disk. Absolute paths, `..`, drive letters, control
+    characters, ZIP64, encryption and methods other than stored and deflate are refused; entry count, per-file and total
+    sizes, and the archive size are limited, and each entry is checked against its declared size and CRC-32.
+  - **RAR**: recognized by its signature and refused with "extract it first"; import the extracted folder instead.
+- The Saves page has no editing controls: characters and the DATA slot's Gold are edited on the Editor page (`SaveEdit` stays the Editor's model).
+- Mutations follow `ActionStateFor`: nothing for an invalid save; Restore and Import wait while the Editor has unapplied
+  changes; nothing while Play is starting. The launcher closes when the game starts, so the page never runs beside the game
+  it started.
+- Restore and Import replace only `SAVE0.DAT`. The Editor's own files, `user/character_appearance.dat` and
+  `user/character_overrides.dat`, are left in place; an override is applied only while its character's identity is still
+  found in the save.
 
 ## Trophies
 
@@ -855,8 +993,9 @@ Play). The launcher closes before the game starts, so its input cannot reach the
 
 ## Window and display scaling
 
-SDL3 runs the process per-monitor-v2 DPI aware (also declared in the manifest). The launcher is 1280 × 720 logical,
-scaled by the display's content scale and capped to 90% of the usable area, so at 225% it is 2880 × 1620 pixels on a
+SDL3 runs the process per-monitor-v2 DPI aware (also declared in the manifest). The launcher is 1280 × 720 logical (at
+least 900 × 610, the height at which all thirteen sidebar pages fit at the compact row), scaled by the display's content
+scale and capped to 90% of the usable area, so at 225% it is 2880 × 1620 pixels on a
 4K display. Window sizes are real pixels. A saved launcher position that no display shows any more is ignored and the
 window is centred on the primary display.
 
@@ -875,6 +1014,11 @@ the same way. The footer's shortcuts come from `LauncherConfig::hints`, two spac
 shortcuts, and its helper text from `note`, one sentence per line. The metrics are in `trg/layout.h`
 (`gpu/patches/trg-launcher/0008-sidebar-footer-alignment.patch`), with `Theme::border_row` and `Theme::border_panel` for
 passive lines (`0009-visual-polish.patch`); interactive controls keep their stronger colours.
+
+In a window too short for every page, even at the compact row, only the sidebar's page list scrolls, with the launcher's
+usual scrollbar in place of its right padding (`0019-sidebar-scroll.patch`). The wheel over the sidebar scrolls it, the
+rows are keyboard and controller targets that ImGui keeps in view, and the current page is brought into view when it
+changes or the window is resized; otherwise the scroll stays where the player left it.
 
 A frame draws one page: `GoToPage` only records the request and `Launcher::Frame` applies it before anything is drawn
 (`gpu/patches/trg-launcher/0007-coherent-page-frames.patch`). Each page has its own scroll window, so it keeps its scroll
@@ -926,6 +1070,7 @@ pixel by pixel. Its "Launcher UI" summary has one row per group:
 | Scrollbar stability | `TestStablePageWidth`, `TestScrollbarSettling` | width, control column, wrap width and separator end identical before and after the scrollbar shows, and after a resize |
 | Separators/row spacing | `TestRowSeparators`, `TestSeparatorPages`, `TestRowRhythm`, `TestRowKinds` | full-width lines independent of the column clip, theme-only border colours, short, wrapped and control rows |
 | Sidebar EN/PT-BR | `TestSidebarProportions`, `TestSidebarLabels` | labels (longest: Jogabilidade), clamp, nine rows without a scrollbar, width handed to the page |
+| Sidebar scrolling | `TestSidebarScrollRange`, `TestSidebarScrollFrames` | scroll range and clamps, reveal of the current page, then real headless frames at 100, 150 and 225 percent: wheel ownership, clicks on scrolled rows, arrows, Tab and D-pad keeping focus in view, badge on its row, clipping, no scrollbar when every page fits |
 | Navigation coherence | `TestPageNavigation` | one commit per frame, no mixed frames under rapid requests, one scroll window per page |
 | TRG patch chain | `tests\launcher_gate_tests.ps1` | the series applies to the pinned revision in a scratch clone, and equals the checkout the tests read |
 | Compiler warnings | `tests\launcher_gate_tests.ps1` | the launcher sources and `launcher_tests.cpp`, syntax-only with the build's own `-Wall -Wextra`: zero warnings |
@@ -955,3 +1100,7 @@ prompts, and with PlayStation (original) saved starts it with the original ones.
    Xbox.". Play: the tutorial and menus show A/B/X/Y, LB/RB, MENU and VIEW. Set PlayStation (original): the archives
    are back to their original size and the `.undo` files are gone. Reinstall the game with Xbox chosen: it is
    re-applied after the install.
+
+### Character Highlight
+
+A shortcut feature with no Gameplay setting. The key (**Port hotkeys**, F7 by default) toggles a colored outline around Player 1; the **Character Highlight** choice in **Controller shortcuts** (`View / Back + R3` by default, or `View / Back + L3`, `L1 + R3`, `R1 + L3`, Off) toggles it for the player the controller that pressed it drives. Every player starts Off in every session; the state is never saved. It is a local visual effect only, offline and online: it outlines the characters this client controls on this screen, is never sent to another client, and never outlines another player. The key toggles the primary local player (the first seat this client owns, which on an online guest can be the second party slot), a controller toggles the local player it drives. Colors follow the party slot: first red, second blue, third green, fourth yellow. Custom looks made with the Appearance Editor are recognised for the local players. The outline is matched by the character's exact atlas, so two local players with the same class and look cannot be told apart: that atlas is left without an outline and the log says `shared atlas ambiguous`.

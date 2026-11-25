@@ -89,8 +89,8 @@ foreach ($file in Get-GitLines @('ls-files', '--cached', '--others', '--exclude-
     if ($file -match '(?i)\.(png|jpg|jpeg|bmp|ppm|tga)$|golden|snapshot|screenshot') { Fail $hygiene "$file is a test image: the launcher gate compares geometry, not pictures" }
 }
 $expectedAssets = @('assets/launcher/README.md', 'assets/launcher/header-art.png', 'assets/launcher/header-art.svg',
-    'assets/launcher/sponsor-heart.png', 'assets/launcher/sponsor-heart.svg', 'assets/launcher/icons/SOURCES.md') +
-    @('play', 'display', 'graphics', 'gameplay', 'online', 'cheats', 'controls', 'trophies', 'editor', 'bug-report', 'about' | ForEach-Object { "assets/launcher/icons/$_.svg" })
+    'assets/launcher/home_background.png', 'assets/launcher/sponsor-heart.png', 'assets/launcher/sponsor-heart.svg', 'assets/launcher/icons/SOURCES.md') +
+    @('home', 'play', 'display', 'graphics', 'gameplay', 'online', 'cheats', 'controls', 'trophies', 'save', 'editor', 'bug-report', 'about', 'appearance', 'inventory', 'back', 'download', 'wifi', 'avatar' | ForEach-Object { "assets/launcher/icons/$_.svg" })
 $assets = @(Get-GitLines @('ls-files', '--cached', '--others', '--exclude-standard', '--', 'assets/launcher') | Sort-Object -Unique |
     Where-Object { Test-Path -LiteralPath (Join-Path $root $_) })
 foreach ($file in $assets | Where-Object { $expectedAssets -notcontains $_ }) { Fail $hygiene "unexpected launcher asset: $file" }
@@ -176,9 +176,10 @@ if (-not $trgLine) {
 
 $warnings = 'launcher-warnings'
 $windows = 'launcher-parity-windows'
-$units = @('launcher/page_icons.cpp', 'launcher/header_art.cpp', 'launcher/launcher.cpp', 'launcher/online_page.cpp', 'launcher/trophy_page.cpp',
+$units = @('launcher/page_icons.cpp', 'launcher/header_art.cpp', 'launcher/home_stats.cpp', 'launcher/home_art.cpp', 'launcher/home_community.cpp', 'launcher/home_portraits.cpp', 'launcher/home_page.cpp', 'launcher/launcher.cpp', 'launcher/online_page.cpp', 'launcher/trophy_page.cpp',
            'launcher/incident_page.cpp', 'launcher/incident_report.cpp', 'launcher/log_scrubber.cpp', 'launcher/my_reports.cpp',
-           'launcher/report_history.cpp', 'launcher/headless.cpp', 'launcher/game_patches.cpp',
+           'launcher/report_history.cpp', 'launcher/headless.cpp', 'launcher/game_patches.cpp', 'launcher/save_page.cpp',
+           'launcher/save_page_model.cpp', 'launcher/save_import.cpp', 'launcher/save_zip.cpp', 'launcher/save_sfo.cpp', 'launcher/save_ps3.cpp', 'launcher/save_ps3_layout.cpp', 'tests/save_page_tests.cpp', 'launcher/editor_inventory.cpp', 'launcher/inventory_data.cpp', 'launcher/inventory_model.cpp', 'launcher/item_catalog.cpp', 'tests/inventory_editor_tests.cpp',
            'launcher/host.cpp', 'launcher/updater/update_ui.cpp', 'tests/launcher_tests.cpp')
 $compile = @()
 if (-not $BuildDir -or -not (Test-Path -LiteralPath (Join-Path $BuildDir 'build.ninja'))) {

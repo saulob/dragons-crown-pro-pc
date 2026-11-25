@@ -32,16 +32,17 @@ target_link_libraries(dcp_imgui_sdl PUBLIC SDL3::SDL3)
 # Game files (check, PKG unpacking, install, boot image), the trophies (src/trophies), the settings file, the Display options and the Controller prompts patch:
 # no window needed (tests link only this).
 find_package(ZLIB REQUIRED)
-add_library(dcp_launcher_core STATIC boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp headless.cpp install_source.cpp
-    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
-    save_edit.cpp save_backup.cpp save_data.cpp save_discovery.cpp save_import.cpp game_texture.cpp game_mbs.cpp
+add_library(dcp_launcher_core STATIC atlas_signatures.cpp boot_image.cpp build_diagnostics.cpp build_scan.cpp build_scan_sites.cpp controller_prompts.cpp cpk_patch.cpp file_browser.cpp fms_sheet.cpp game_files.cpp headless.cpp install_source.cpp
+    feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp home_art.cpp home_community.cpp home_portraits.cpp home_stats.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp hangul_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c ${PROJECT_SOURCE_DIR}/src/hangul_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
+    save_edit.cpp save_backup.cpp save_data.cpp inventory_data.cpp modifier_values.cpp item_catalog.cpp inventory_model.cpp save_discovery.cpp save_import.cpp save_page_model.cpp save_sfo.cpp save_zip.cpp save_ps3.cpp save_ps3_layout.cpp crypto_hmac.cpp game_texture.cpp game_mbs.cpp
     sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp fighter_bare_head.cpp
-    appearance_remote.cpp ${PROJECT_SOURCE_DIR}/src/appearance_net.cpp
+    hp_override.cpp hp_override_runtime.cpp
+    appearance_remote.cpp ${PROJECT_SOURCE_DIR}/src/appearance_net.cpp updater/json.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_store.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_view.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trp_archive.cpp
-    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c ${PROJECT_SOURCE_DIR}/src/appearance_hooks.c
+    ${PROJECT_SOURCE_DIR}/src/skip_intro.c ${PROJECT_SOURCE_DIR}/src/gallery_unlock.c ${PROJECT_SOURCE_DIR}/src/default_message_hook.c ${PROJECT_SOURCE_DIR}/src/menu_buttons.c ${PROJECT_SOURCE_DIR}/src/appearance_hooks.c ${PROJECT_SOURCE_DIR}/src/hp_override_hooks.c
     ${PROJECT_SOURCE_DIR}/src/guest_hook.c)
 target_include_directories(dcp_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(dcp_launcher_core PUBLIC trg_core SDL3::SDL3 dcp_ui_text dcp_keys dcp_net dcp_startup_phase PRIVATE ZLIB::ZLIB)
@@ -129,6 +130,10 @@ dcp_embed_folder(kRuTranslation ru_sheets localization/ru/sheets/*.json)
 dcp_embed_folder(kRuSources ru_sources localization/ru/sources/*.json)
 dcp_embed_folder(kRuFont ru_font localization/ru/font/*.glyphs.z)
 
+# The Korean translation (localization/ko): its sheets and the Hangul syllables drawn for the main font atlas.
+dcp_embed_folder(kKoTranslation ko_sheets localization/ko/sheets/*.json)
+dcp_embed_folder(kKoFont ko_font localization/ko/font/*.glyphs.z)
+
 # The PT-BR visual patches (localization/pt-BR/visual/*.dcpx.z) as a table of byte arrays, game_translation.h.
 file(GLOB DCP_PTBR_VISUAL_PATCHES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/localization/pt-BR/visual/*.dcpx.z)
 list(SORT DCP_PTBR_VISUAL_PATCHES)
@@ -172,9 +177,9 @@ add_custom_command(OUTPUT ${DCP_SPIDER_PATCH_SOURCE}
     DEPENDS ${DCP_SPIDER_PATCH} ${CMAKE_CURRENT_SOURCE_DIR}/embed.cmake
     COMMENT "Embedding prompts/arachnophobia-spider.dcpx")
 
-add_library(dcp_launcher STATIC host.cpp incident_page.cpp launcher.cpp my_reports.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
-    editor_page.cpp
-    updater/github_release.cpp updater/json.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
+add_library(dcp_launcher STATIC home_page.cpp host.cpp incident_page.cpp launcher.cpp my_reports.cpp online_page.cpp package_browser.cpp problem_dialog.cpp shift_key.cpp trophy_page.cpp update_config.cpp
+    editor_page.cpp editor_inventory.cpp save_page.cpp
+    updater/github_release.cpp updater/sha256.cpp updater/third_party/miniz/miniz.c
     updater/update_controller.cpp updater/update_job.cpp updater/update_paths.cpp updater/update_platform.cpp
     updater/update_ui.cpp updater/update_zip.cpp updater/version.cpp
     ${DCP_PROMPTS_PATCH_SOURCE} ${DCP_SPIDER_PATCH_SOURCE})
@@ -219,15 +224,32 @@ add_executable(dcp-launcher-shots EXCLUDE_FROM_ALL ../tests/launcher_shots.cpp)
 target_link_libraries(dcp-launcher-shots PRIVATE dcp_launcher)
 set_target_properties(dcp-launcher-shots PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 
+# TRG's launcher on Dear ImGui alone, so that the tests draw real frames with no window or renderer.
+set(DCP_LAUNCHER_TEST_IMGUI ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+set_source_files_properties(${DCP_LAUNCHER_TEST_IMGUI} PROPERTIES COMPILE_OPTIONS -w)
+add_library(trg_launcher_headless STATIC EXCLUDE_FROM_ALL ${TRG_DIR}/src/launcher.cpp ${DCP_LAUNCHER_TEST_IMGUI})
+target_include_directories(trg_launcher_headless PUBLIC ${IMGUI_DIR})
+target_compile_definitions(trg_launcher_headless PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(trg_launcher_headless PUBLIC trg_core)
+set_target_properties(trg_launcher_headless PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
 # Focused tests with synthetic data and temporary folders (tools\test.ps1); not part of the default build.
 find_package(PNG REQUIRED)
 add_executable(dcp-launcher-tests EXCLUDE_FROM_ALL ../tests/launcher_tests.cpp ${DCP_LOG_SOURCES}
     ../gpu/shim/dcp_settings.cpp ../gpu/shim/dcp_png.cpp ${PROJECT_SOURCE_DIR}/src/exit_game_text.c)
 target_compile_definitions(dcp-launcher-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core PNG::PNG)
+target_link_libraries(dcp-launcher-tests PRIVATE dcp_launcher_core trg_launcher_headless PNG::PNG)
 target_include_directories(dcp-launcher-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/shim)
 set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Korean Menu & Subtitles language (tools/test.ps1 and tools/build.sh --korean-localization): the
+# USA and European profiles, the corpus, the Hangul atlas and glyph table. The local USA game folder is read only.
+add_executable(dcp-korean-localization-tests EXCLUDE_FROM_ALL ../tests/korean_localization_tests.cpp)
+target_link_libraries(dcp-korean-localization-tests PRIVATE dcp_launcher_core ZLIB::ZLIB)
+target_compile_definitions(dcp-korean-localization-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-korean-localization-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-korean-localization-tests PRIVATE -Wall -Wextra)
 
 # Unsupported-build diagnostics: SELF parsing, signature scan, relations, classification and report, on synthetic images
 # (plus the local game fixtures under game\prepared when present).
@@ -293,6 +315,22 @@ target_compile_definitions(dcp-save-editor-tests PRIVATE DCP_SOURCE_DIR="${PROJE
 set_target_properties(dcp-save-editor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-save-editor-tests PRIVATE -Wall -Wextra)
 
+# Focused tests of the Save page: overview, DATA slots, backups, export, import, restore and the Editor invalidation
+# contract on synthetic saves in a temporary folder; no window, no game.
+add_executable(dcp-save-page-tests EXCLUDE_FROM_ALL ../tests/save_page_tests.cpp)
+target_link_libraries(dcp-save-page-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-save-page-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-save-page-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-save-page-tests PRIVATE -Wall -Wextra)
+
+# Focused tests of the Inventory Editor: item records, catalog, edits, safety and the editor page's structure on
+# synthetic saves; no window, no game.
+add_executable(dcp-inventory-editor-tests EXCLUDE_FROM_ALL ../tests/inventory_editor_tests.cpp)
+target_link_libraries(dcp-inventory-editor-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-inventory-editor-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-inventory-editor-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-inventory-editor-tests PRIVATE -Wall -Wextra)
+
 # Focused tests of the shared test progress reporter (tests/test_progress.h); header only, injected clock, no game.
 add_executable(dcp-test-progress-tests EXCLUDE_FROM_ALL ../tests/test_progress_tests.cpp)
 target_compile_definitions(dcp-test-progress-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -308,3 +346,10 @@ target_link_libraries(dcp-appearance-online-tests PRIVATE dcp_launcher_core)
 target_compile_definitions(dcp-appearance-online-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 set_target_properties(dcp-appearance-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-appearance-online-tests PRIVATE -Wall -Wextra)
+
+# F3K8S: persistent per-character stat overrides, native fallback per field, and real build hooks.
+add_executable(dcp-character-override-tests EXCLUDE_FROM_ALL ../tests/character_override_tests.cpp)
+target_link_libraries(dcp-character-override-tests PRIVATE dcp_launcher_core)
+target_compile_definitions(dcp-character-override-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+set_target_properties(dcp-character-override-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-character-override-tests PRIVATE -Wall -Wextra)

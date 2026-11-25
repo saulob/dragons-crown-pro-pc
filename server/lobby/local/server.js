@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util';
 
 import { INCIDENT } from '../src/incidents.js';
 import { Lobby, PROTOCOL } from '../src/lobby.js';
+import { STATS_PATH, statsHandler } from '../src/stats.js';
 import { LocalConn, LocalHost, sqliteStore } from './host.js';
 import { upgrade } from './ws.js';
 
@@ -61,7 +62,15 @@ export function startLobbyServer({ host: address = '127.0.0.1', port = 8790, db 
       (ghosts ? `; ${ghosts} rooms of the previous run removed` : ''));
   }
 
+  const stats = statsHandler();
   const server = createServer((req, res) => {
+    if (new URL(req.url, 'http://lobby').pathname === STATS_PATH) {
+      stats(new Request('http://lobby/stats', { method: req.method }), async () => lobby.showcase()).then(async (answer) => {
+        res.writeHead(answer.status, Object.fromEntries(answer.headers));
+        res.end(req.method === 'HEAD' ? undefined : await answer.text());
+      });
+      return;
+    }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.end(JSON.stringify({ service: 'dcp-lobby (local)', proto: PROTOCOL, sockets: host.conns.size }));

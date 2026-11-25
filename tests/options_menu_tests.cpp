@@ -752,7 +752,9 @@ void TestLauncherParity() {
         "show_ping",
         "show_in_lobby", "early_story_online",
         "dcp_japanese_npc_voices",
-        "controller_exit_shortcut"};
+        "controller_exit_shortcut",
+        "controller_character_highlight",
+        "controller_comms_wheel"};
     const auto has = [](const std::vector<std::string>& list, const std::string& key) {
         return std::find(list.begin(), list.end(), key) != list.end();
     };
@@ -1457,6 +1459,31 @@ void TestExitGameHotkeyInfo(const fs::path& folder) {
         Check(std::string(setting.key) != "controller_exit_shortcut" && std::string(setting.key) != "hotkey_exit_game",
               "F1 does not edit the Exit Game shortcuts");
     }
+
+    // DCP-TWGQWK: Comms Wheel controller shortcut defaults to View / Back + D-pad Up, not bare D-pad Up.
+    Check(defaults.comms_wheel_chord == dcp::comms::kDefaultControllerShortcut,
+          "DCP-TWGQWK Comms Wheel controller shortcut defaults to safe chord");
+    Check(DcpOptions::CommsWheelHotkeyText("T", defaults.comms_wheel_chord) == "T  /  View / Back + D-pad Up",
+          "DCP-TWGQWK F1 shows keyboard key and default controller chord");
+    Check(DcpOptions::CommsWheelHotkeyText("T", dcp::comms::kControllerShortcutOff) == "T",
+          "DCP-TWGQWK F1 shows only keyboard key when controller shortcut is Off");
+    WriteFile(file, "hotkey_comms_wheel = g\ncontroller_comms_wheel = off\n");
+    DcpSettings::Values comms_saved;
+    Check(DcpSettings::Read(file.string(), comms_saved) && comms_saved.comms_key == SDL_SCANCODE_G &&
+              comms_saved.comms_wheel_chord == dcp::comms::kControllerShortcutOff,
+          "DCP-TWGQWK saved Comms Wheel controller shortcut is read");
+    WriteFile(file, "hotkey_comms_wheel = t\n");
+    DcpSettings::Values comms_upgrade;
+    Check(DcpSettings::Read(file.string(), comms_upgrade) &&
+              comms_upgrade.comms_wheel_chord == dcp::comms::kDefaultControllerShortcut,
+          "DCP-TWGQWK old config without controller_comms_wheel gets safe default");
+    WriteFile(file, "controller_comms_wheel = invalid_chord\n");
+    DcpSettings::Values comms_bad;
+    Check(DcpSettings::Read(file.string(), comms_bad) &&
+              comms_bad.comms_wheel_chord == dcp::comms::kDefaultControllerShortcut,
+          "DCP-TWGQWK invalid controller_comms_wheel falls back to safe default");
+    Check(Contains(menu, "{dcp::Tr(\"Comms Wheel\"), DcpOptions::CommsWheelHotkeyText(KeyName(settings.comms_key), settings.comms_wheel_chord)}"),
+          "DCP-TWGQWK Options menu shows Comms Wheel key and controller shortcut");
     const std::string portuguese = Source("launcher/localization/pt_br_ui_text.cpp");
     Check(Contains(portuguese, "Exit Game\tSair do jogo\n"), "the Exit Game label is translated");
 }

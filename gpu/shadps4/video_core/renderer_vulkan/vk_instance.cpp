@@ -358,6 +358,7 @@ bool Instance::CreateDevice() {
         if (!attachment_feedback_loop) {
             // We want both extensions so remove the first if the second isn't available
             enabled_extensions.pop_back();
+            attachment_feedback_loop_layout_only = true;
         }
     }
     depth_range_unrestricted = add_extension(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
@@ -390,6 +391,15 @@ bool Instance::CreateDevice() {
     provoking_vertex =
         feature_chain.get<vk::PhysicalDeviceProvokingVertexFeaturesEXT>().provokingVertexLast &&
         add_extension(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
+    if (provoking_vertex) {
+        const auto provoking_props =
+            physical_device
+                .getProperties2<vk::PhysicalDeviceProperties2,
+                                vk::PhysicalDeviceProvokingVertexPropertiesEXT>()
+                .get<vk::PhysicalDeviceProvokingVertexPropertiesEXT>();
+        provoking_vertex_mode_per_pipeline =
+            bool(provoking_props.provokingVertexModePerPipeline);
+    }
     shader_stencil_export = add_extension(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
     image_load_store_lod = add_extension(VK_AMD_SHADER_IMAGE_LOAD_STORE_LOD_EXTENSION_NAME);
     amd_gcn_shader = add_extension(VK_AMD_GCN_SHADER_EXTENSION_NAME);

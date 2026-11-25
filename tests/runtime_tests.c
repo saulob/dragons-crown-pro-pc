@@ -443,9 +443,8 @@ static void test_thread_cancel(void) {
     void *quick_result = NULL;
     CHECK(thread_join(quick, &quick_result) == 0 && quick_result == (void *)(uintptr_t)150);
 
-    /* D: a running thread that outlives the ~2s grace period. The process stays alive, cancel returns
-     * deterministically, and the thread is still joinable (no double join, no premature stack release) once it
-     * finishes naturally. */
+    /* D: a running thread that outlives the old 2s grace period. Cancel waits for it to finish, so a detached worker
+     * can never keep using its owner after the owner is freed; the thread stays joinable afterward. */
     atomic_store(&workers_done, 0);
     void *slow = NULL;
     CHECK(thread_create(&slow, NULL, sleepy_worker, (void *)(uintptr_t)2500, "cancel-slow") == 0);
@@ -453,9 +452,8 @@ static void test_thread_cancel(void) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     CHECK(thread_cancel(slow) == 0);
     double waited = elapsed_ms(t1);
-    CHECK(waited >= 1800.0 && waited < 2600.0);
-    CHECK(atomic_load(&workers_done) == 0); /* still running past the grace period */
-    wait_for_workers(1);
+    CHECK(waited >= 2400.0 && waited < 3500.0);
+    CHECK(atomic_load(&workers_done) == 1); /* cancel returned only after the worker finished */
     void *slow_result = NULL;
     CHECK(thread_join(slow, &slow_result) == 0 && slow_result == (void *)(uintptr_t)2500);
 

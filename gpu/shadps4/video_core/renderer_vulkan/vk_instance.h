@@ -206,6 +206,14 @@ public:
         return provoking_vertex;
     }
 
+    bool IsProvokingVertexModePerPipelineSupported() const {
+        return provoking_vertex_mode_per_pipeline;
+    }
+
+    bool IsAttachmentFeedbackLoopLayoutOnlyAvailable() const {
+        return attachment_feedback_loop_layout_only;
+    }
+
     GpuCompat::Capabilities GetGpuCapabilities() const {
         return {
             .vendor_id = GetVendorID(),
@@ -551,6 +559,7 @@ private:
     bool vertex_input_dynamic_state{};
     bool list_restart{};
     bool provoking_vertex{};
+    bool provoking_vertex_mode_per_pipeline{true};
     bool shader_stencil_export{};
     bool image_load_store_lod{};
     bool amd_gcn_shader{};
@@ -565,6 +574,7 @@ private:
     vk::PipelineBinaryKeyKHR pipeline_binary_global_key{};
     bool maintenance_8{};
     bool attachment_feedback_loop{};
+    bool attachment_feedback_loop_layout_only{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
     bool shader_clock{};

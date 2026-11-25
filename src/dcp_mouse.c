@@ -15,6 +15,7 @@
 #define MARGIN_X (DCP_TOUCH_RES_X/5)
 #define MARGIN_Y (DCP_TOUCH_RES_Y/5)
 #define PENDING_LIMIT 4.0f
+#define ALWAYS_ON_IDLE_LIFT_READS 6
 #define MAX_LINES 4
 #define LINE_SIZE DCP_TRACKPAD_LINE_SIZE
 
@@ -38,6 +39,7 @@ struct DcpMouseState {
     float pending_x, pending_y;
     Phase phase;
     int recenter_due;
+    int idle_reads;
     float x, y;
     uint8_t id;
     /* Always On bookkeeping */
@@ -235,6 +237,7 @@ static void clear_held(DcpMouseState *s) {
     s->pending_x=s->pending_y=0;
     s->phase=PHASE_IDLE;
     s->recenter_due=0;
+    s->idle_reads=0;
     s->extended_down=0;
     s->tp_click_noted=0;
 }
@@ -419,6 +422,22 @@ void dcp_mouse_screen_surface(DcpMouseState *s, int touching) {
     leave(s);
 }
 
+static int has_pending(const DcpMouseState *s) { return s->pending_x!=0.0f || s->pending_y!=0.0f; }
+
+void dcp_mouse_controller_stick(DcpMouseState *s, int active) {
+    if (!active) return;
+    state_lock(s);
+    if (always_on(s) && s->phase==PHASE_DOWN && !has_pending(s)) {
+        s->phase=PHASE_IDLE;
+        s->recenter_due=0;
+        s->idle_reads=0;
+        if (s->tp_mode==DCP_TRACKPAD_MODE_MOUSE_FALLBACK) {
+            note_trackpad(s,DCP_TRACKPAD_EVENT_YIELDED_TO_STICK,DCP_TRACKPAD_REASON_NONE);
+        }
+    }
+    leave(s);
+}
+
 int dcp_mouse_pointer_active(DcpMouseState *s) {
     state_lock(s);
     const int active=pointer_active(s);
@@ -455,7 +474,11 @@ static void place_finger(DcpMouseState *s, DcpMouseSample *out) {
     s->id=(uint8_t)((s->id+1)&0x7f);
     s->phase=PHASE_DOWN;
     s->recenter_due=0;
+    s->idle_reads=0;
     out->touch=1;
+    if (s->tp_mode==DCP_TRACKPAD_MODE_MOUSE_FALLBACK) {
+        note_trackpad(s,DCP_TRACKPAD_EVENT_SYNTHETIC_TOUCH_ACTIVE,DCP_TRACKPAD_REASON_NONE);
+    }
 }
 
 static void move_finger(DcpMouseState *s, DcpMouseSample *out) {
@@ -493,6 +516,7 @@ void dcp_mouse_sample(DcpMouseState *s, DcpMouseSample *out) {
     press_gameplay_buttons(s,out);
     if (!active) {
         s->phase=PHASE_IDLE;
+        s->idle_reads=0;
         s->pending_x=s->pending_y=0;
         s->tp_click_noted=0;
         if (s->yield_gap) {
@@ -507,16 +531,30 @@ void dcp_mouse_sample(DcpMouseState *s, DcpMouseSample *out) {
             note_trackpad(s,DCP_TRACKPAD_EVENT_POINTER_INTERACTION,DCP_TRACKPAD_REASON_NONE);
         }
         s->tp_click_noted=click_down;
+        /* In Always On / trackpad fallback, hold a synthetic finger only while moving; a parked idle
+         * touch contact makes the game skip its right-stick pointer path (CUSA10454 0x39b115). */
+        const int demand=!always_on(s) || has_pending(s);
         if (s->gap) {
             s->gap=0;
-            s->phase=PHASE_LIFTED;
+            s->phase=demand ? PHASE_LIFTED : PHASE_IDLE;
             s->recenter_due=0;
+            s->idle_reads=0;
         } else if (s->phase==PHASE_DOWN && s->recenter_due) {
-            s->phase=PHASE_LIFTED;
+            s->phase=demand ? PHASE_LIFTED : PHASE_IDLE;
             s->recenter_due=0;
+            s->idle_reads=0;
         } else if (s->phase==PHASE_DOWN) {
-            move_finger(s,out);
-        } else {
+            if (demand) {
+                s->idle_reads=0;
+                move_finger(s,out);
+            } else if (++s->idle_reads>=ALWAYS_ON_IDLE_LIFT_READS) {
+                s->phase=PHASE_IDLE;
+                s->recenter_due=0;
+                s->idle_reads=0;
+            } else {
+                move_finger(s,out);
+            }
+        } else if (demand) {
             place_finger(s,out);
         }
         if (out->touch) {

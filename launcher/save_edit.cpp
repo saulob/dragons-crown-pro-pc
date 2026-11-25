@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "inventory_data.h"
 #include "save_backup.h"
 
 namespace dcp {
@@ -54,11 +55,31 @@ SaveEdit::Result SaveEdit::Apply() {
     if (FirstInvalidAppearance()) {
         return Result::kInvalidAppearance;
     }
+    for (size_t slot = 0; slot < kDataSlotCount; ++slot) {
+        for (size_t index = 0; index < kCharacterCount; ++index) {
+            const CharacterView& before = save_.model.slots()[slot].characters[index];
+            const CharacterView& after = working_.slots()[slot].characters[index];
+            const bool hp_edited = before.hp_current != after.hp_current || before.hp_max != after.hp_max;
+            if (after.present && hp_edited && after.hp_current > after.hp_max) {
+                detail_ = "the current HP of a character is above its maximum HP";
+                return Result::kInvalidHp;
+            }
+        }
+    }
+    if (std::string error; !ValidateItemChanges(save_.model.bytes(), working_.bytes(), error)) {
+        detail_ = std::move(error);
+        return Result::kInvalidInventory;
+    }
     const std::vector<uint8_t> serialized = working_.Serialize();
     std::vector<std::string> problems;
     if (!ValidateSave(serialized, problems)) {
         detail_ = problems.empty() ? std::string("invalid save") : problems.front();
         return Result::kInvalidSave;
+    }
+    const SaveModel on_disk = SaveModel::FromFile(save_.save0_path);
+    if (!std::ranges::equal(on_disk.bytes(), save_.model.bytes())) {
+        detail_ = "the save changed on disk since it was loaded";
+        return Result::kStale;
     }
     if (!CreateBackup(backup_folder_, save_.save0_path, save_.title_id, save_.dir_name)) {
         return Result::kBackupFailed;
@@ -96,12 +117,38 @@ bool Restore(const std::filesystem::path& path, const std::optional<std::vector<
     return store.Parse(*previous) && store.Save();
 }
 
+bool RestoreOverrides(const std::filesystem::path& path, const std::optional<std::vector<uint8_t>>& previous) {
+    std::error_code ec;
+    if (!previous) {
+        std::filesystem::remove(path, ec);
+        return !std::filesystem::exists(path, ec);
+    }
+    CharacterOverrideStore store(path);
+    return store.Parse(*previous) && store.Save();
+}
+
 } // namespace
 
-ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved) {
+ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
+                      const CharacterOverrideStore* override_working, CharacterOverrideStore* override_saved) {
     ApplyOutcome outcome;
     const bool custom_dirty = !(working == saved);
-    const std::optional<std::vector<uint8_t>> previous = custom_dirty ? Snapshot(saved.path()) : std::nullopt;
+    const bool override_dirty = override_working && override_saved && !(*override_working == *override_saved);
+    const std::optional<std::vector<uint8_t>> prev_custom = custom_dirty ? Snapshot(saved.path()) : std::nullopt;
+    const std::optional<std::vector<uint8_t>> prev_override =
+        override_dirty ? Snapshot(override_saved->path()) : std::nullopt;
+    auto rollback = [&]() {
+        bool ok = true;
+        if (outcome.custom_written) {
+            ok &= Restore(saved.path(), prev_custom);
+            outcome.custom_written = false;
+        }
+        if (outcome.override_written) {
+            ok &= RestoreOverrides(override_saved->path(), prev_override);
+            outcome.override_written = false;
+        }
+        outcome.rolled_back = ok;
+    };
     if (custom_dirty) {
         if (!working.Save()) {
             outcome.custom_failed = true;
@@ -109,13 +156,18 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
         }
         outcome.custom_written = true;
     }
+    if (override_dirty) {
+        if (!override_working->Save()) {
+            outcome.override_failed = true;
+            if (outcome.custom_written) rollback();
+            return outcome;
+        }
+        outcome.override_written = true;
+    }
     if (edit && edit->dirty()) {
         outcome.save = edit->Apply();
         if (outcome.save != SaveEdit::Result::kApplied) {
-            if (custom_dirty) {
-                outcome.rolled_back = Restore(saved.path(), previous);
-                outcome.custom_written = false;
-            }
+            if (outcome.custom_written || outcome.override_written) rollback();
             return outcome;
         }
     }
@@ -125,6 +177,14 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
             saved = working;
         } else {
             outcome.custom_failed = true;
+        }
+    }
+    if (override_dirty) {
+        CharacterOverrideStore reread(override_saved->path());
+        if (reread.Load() && reread == *override_working) {
+            *override_saved = *override_working;
+        } else {
+            outcome.override_failed = true;
         }
     }
     return outcome;

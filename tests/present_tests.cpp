@@ -889,6 +889,70 @@ void TestPadSamplingUntouched() {
     CHECK(!Contains(pad, "DCP_INPUT_LATENCY_TRACE\")"));
 }
 
+void TestPresentGapTelemetry() {
+    DcpPresent::StallMonitor monitor;
+
+    // Normal 60/120 FPS cadence stays completely silent.
+    for (int i = 0; i < 120; ++i) {
+        const std::int64_t t = 1000 + i * 8;
+        CHECK(monitor.ObservePresent(t, static_cast<std::uint64_t>(i / 2), 1, 0, 0).empty());
+        CHECK(monitor.ObserveVideoOut(t, 1, 0, 0).empty());
+        CHECK(monitor.ObserveGuestSubmit(t, static_cast<std::uint64_t>(i / 2), 1).empty());
+    }
+    CHECK(monitor.ObservePipelineStall(2000, "pipeline_create", 120, 90, false, false).empty());
+
+    // A >500 ms present gap logs once with acquire/present results and source/swapchain change state.
+    const std::string gap1 = monitor.ObservePresent(2600, 60, 1, 0, 0);
+    CHECK(Contains(gap1, "Presenter telemetry: event=present_gap severity=notable duration_ms=648"));
+    CHECK(Contains(gap1, "acquire=VK_SUCCESS present=VK_SUCCESS"));
+    CHECK(Contains(gap1, "source_changed=yes swapchain_changed=no swapchain_gen=1"));
+    CHECK(Contains(gap1, "recent_pipeline_stall_ms=0 count=1"));
+
+    // Repeated notable gaps are bounded (powers of ten: 2..9 silent, 10 logged).
+    std::int64_t t = 2600;
+    for (int n = 2; n <= 9; ++n) {
+        t += 600;
+        CHECK(monitor.ObservePresent(t, 60, 1, 0, 0).empty());
+    }
+    t += 600;
+    const std::string gap10 = monitor.ObservePresent(t, 60, 1, 0, 0);
+    CHECK(Contains(gap10, "event=present_gap severity=notable"));
+    CHECK(Contains(gap10, "source_changed=no"));
+    CHECK(Contains(gap10, "count=10"));
+
+    // A severe >=2000 ms pipeline creation stall is logged and correlated with the following present gap.
+    const std::string pipe_stall =
+        monitor.ObservePipelineStall(t + 2400, "pipeline_create", 2400, 2350, false, false);
+    CHECK(Contains(pipe_stall, "GPU stall telemetry: event=pipeline_create severity=severe duration_ms=2400"));
+    CHECK(Contains(pipe_stall, "driver_ms=2350 mixed_samples=no preloading=no count=1"));
+
+    const std::string severe_gap = monitor.ObservePresent(t + 2500, 61, 2, 1000001003, 0);
+    CHECK(Contains(severe_gap, "Presenter telemetry: event=present_gap severity=severe duration_ms=2500"));
+    CHECK(Contains(severe_gap, "acquire=VK_SUBOPTIMAL_KHR present=VK_SUCCESS"));
+    CHECK(Contains(severe_gap, "source_changed=yes swapchain_changed=yes swapchain_gen=2"));
+    CHECK(Contains(severe_gap, "recent_pipeline_stall_ms=2400"));
+
+    // VideoOut and guest submit gaps also correlate with recent pipeline stalls.
+    const std::string vo_gap = monitor.ObserveVideoOut(t + 2500, 2, 0, 0);
+    CHECK(Contains(vo_gap, "Presenter telemetry: event=videoout_gap severity=severe"));
+    CHECK(Contains(vo_gap, "recent_pipeline_stall_ms=2400"));
+
+    const std::string submit_gap = monitor.ObserveGuestSubmit(t + 2500, 61, 2);
+    CHECK(Contains(submit_gap, "Presenter telemetry: event=guest_submit_gap severity=severe"));
+    CHECK(Contains(submit_gap, "recent_pipeline_stall_ms=2400"));
+
+    // Verify call sites are wired in renderer and VideoOut.
+    const std::string pipeline = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.cpp");
+    CHECK(Contains(pipeline, "DcpPresent::RecordPipelineStall(\"pipeline_create\""));
+    const std::string cache = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_cache.cpp");
+    CHECK(Contains(cache, "DcpPresent::RecordPipelineStall(\"pipeline_cache_compile\""));
+    const std::string presenter = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp");
+    CHECK(Contains(presenter, "DcpPresent::RecordVideoOut();"));
+    CHECK(Contains(presenter, "DcpPresent::RecordPresent();"));
+    const std::string driver = ReadSource("gpu/shadps4/core/libraries/videoout/driver.cpp");
+    CHECK(Contains(driver, "DcpPresent::RecordGuestSubmit();"));
+}
+
 } // namespace
 
 int main() {
@@ -935,6 +999,7 @@ int main() {
     TestPresentResultMapping();
     TestDeviceLostReport();
     TestWindowActiveUntouched();
+    TestPresentGapTelemetry();
     if (g_failures) {
         std::printf("%d present test(s) failed\n", g_failures);
         return 1;

@@ -130,8 +130,9 @@ test('rooms of a database made before the protocol columns read as protocol 0', 
   const host = new LocalHost(store, { now: () => 1_700_000_000_000, log: (text) => { throw new Error(text); } });
   const lobby = new Lobby(host);
   assert.equal(lobby.roomRow(4096).online_protocol, 0);
-  assert.equal(lobby.meta('schema'), '7');
+  assert.equal(lobby.meta('schema'), '8');
   assert.equal(lobby.roomRow(4096).platforms, 0);
+  assert.equal(lobby.roomRow(4096).difficulty, '');
   const again = new Lobby(host);
-  assert.equal(again.meta('schema'), '7');
+  assert.equal(again.meta('schema'), '8');
 });

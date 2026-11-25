@@ -107,6 +107,22 @@ int early_story_own_step(void) {
     return atomic_load(&own_step_seen);
 }
 
+static _Atomic int own_difficulty_seen = EARLY_STORY_NO_DIFFICULTY;
+static _Atomic int own_player_seen;
+
+int early_story_note_own_difficulty(int player, int raw) {
+    const int changed = atomic_exchange(&own_difficulty_seen, raw) != raw;
+    return atomic_exchange(&own_player_seen, player) != player || changed;
+}
+
+int early_story_own_difficulty(void) {
+    return atomic_load(&own_difficulty_seen);
+}
+
+int early_story_own_player(void) {
+    return atomic_load(&own_player_seen);
+}
+
 void early_story_session_observe_own_step(EarlyStoryStepObserver observer) {
     atomic_store(&own_step_observer, observer);
 }

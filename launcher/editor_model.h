@@ -11,6 +11,7 @@
 
 #include "appearance_custom.h"
 #include "game_files.h"
+#include "inventory_data.h"
 #include "save_data.h"
 #include "save_discovery.h"
 #include "sprite_render.h"
@@ -97,12 +98,72 @@ inline constexpr NumberRange kGoldRange{0, int(kMaxGold)};
 inline constexpr NumberRange kLevelRange{kMinLevel, kMaxLevel};
 inline constexpr NumberRange kSkillPointRange{0, kMaxSkillPoints};
 inline constexpr NumberRange kHpRange{0, kMaxHp};
+inline constexpr NumberRange kCharacterStatRange{0, kMaxCharacterStat};
 
 int ClampNumber(int value, NumberRange range);
+// The value a drag of `pixels` from `anchor` reaches at one unit per pixel, kept inside the range.
+int FineDragValue(int anchor, float pixels, NumberRange range);
+// The horizontal span of an integer slider's grab (ImGui's own layout: 2 px padding, the grab covers one unit when it can).
+struct Span {
+    float min = 0.0f, max = 0.0f;
+};
+Span SliderGrabSpan(float frame_min, float frame_max, NumberRange range, int value, float grab_min_width);
+// Whether the colored span is behind most of the text span.
+bool TextOverSpan(Span text, Span covered);
 // The value moved by exactly `delta` and kept inside the range.
 int StepNumber(int value, int delta, NumberRange range);
 // Typed text with or without thousands separators, clamped to the range; nothing when it holds no number.
 std::optional<int> ParseNumber(std::string_view text, NumberRange range);
+// A press on a slider track becomes an edit only once the pointer has moved this far: ImGui would otherwise jump the value to
+// wherever a plain click lands, changing fields that were only clicked.
+inline constexpr float kSliderDragThreshold = 4.0f; // at scale 1
+inline bool SliderDragStarted(float press_x, float x, float scale) {
+    const float moved = x - press_x;
+    return (moved < 0.0f ? -moved : moved) >= kSliderDragThreshold * scale;
+}
+
+// The number being typed into one control, owned by that control's id. Typing into another control hands the earlier text
+// to its own control, which commits it through its own setter; nothing is ever committed through another field.
+class TypedNumberEdit {
+public:
+    bool Editing(uint32_t id) const { return owner_ == id; }
+    void Begin(uint32_t id, std::string_view previous_text);
+    void End() { owner_ = 0; }
+    std::optional<std::string> TakeHanded(uint32_t id);
+    void Clear();
+
+private:
+    uint32_t owner_ = 0;
+    std::vector<std::pair<uint32_t, std::string>> handed_;
+};
+
+// The number a text holds when it is a whole number inside the range as typed; nothing for empty, invalid or out-of-range text.
+std::optional<int> ExactTypedNumber(std::string_view text, NumberRange range);
+// One typed edit of an item field. It keeps the record as it was when typing began and evaluates every text from that
+// snapshot: a valid number is applied through the field's setter to the snapshot, anything else leaves the snapshot, so a
+// prefix such as "9" on the way to "99" never leaves a dependent change behind. It is a temporary snapshot, not a model.
+class TypedFieldEdit {
+public:
+    bool Active() const { return active_; }
+    bool Is(const ItemRef& ref, std::string_view key) const { return active_ && ref_ == ref && key_ == key; }
+    const ItemRef& ref() const { return ref_; }
+    NumberRange range() const { return range_; }
+    void Begin(const ItemRef& ref, std::string key, NumberRange range, std::vector<uint8_t> snapshot);
+    void Update(SaveModel& edited, std::string_view text);
+    void Finish(SaveModel& edited, std::string_view text); // an out-of-range number is clamped
+    void Cancel(SaveModel& edited);
+    void End() { active_ = false; }
+
+private:
+    bool active_ = false;
+    ItemRef ref_;
+    std::string key_;
+    NumberRange range_;
+    std::vector<uint8_t> snapshot_;
+};
+
+// What leaving a typed field commits, by Enter or by clicking away: the typed number when it differs from the current one.
+std::optional<int> CommitTypedNumber(std::string_view text, NumberRange range, int current);
 // 2356557 -> "2,356,557": display only, never stored.
 std::string FormatThousands(int64_t value);
 
@@ -205,6 +266,24 @@ struct SummaryLayout {
 };
 SummaryLayout LayoutCharacterSummary(float row_width, float info_width, float control_width, float frame_height,
                                      float spacing, float scale);
+// Edit Appearance and Edit Inventory share the summary's button column, side by side.
+struct SummaryButtons {
+    float width = 0.0f;
+    float second_x = 0.0f; // from the first button's left edge
+};
+SummaryButtons SplitSummaryButtons(const SummaryLayout& layout, float spacing);
+
+// The Inventory Editor: the item list beside the item's details; the details go under the list when the page is narrow.
+inline constexpr float kInventoryWideWidth = 720.0f; // at scale 1
+inline constexpr float kInventoryListWeight = 0.42f;
+inline constexpr float kInventoryMinHeight = 320.0f; // at scale 1
+struct InventoryLayout {
+    bool stacked = false;
+    float list_width = 0.0f;
+    float detail_width = 0.0f;
+};
+InventoryLayout LayoutInventory(float width, float gap, float scale);
+
 ImagePoint MapToImage(float mouse_x, float mouse_y, float image_min_x, float image_min_y, float scale);
 inline constexpr float kNumberGlyphThickness = 2.5f;     // at scale 1
 
@@ -235,12 +314,13 @@ struct IdentityLine {
 };
 IdentityLine LayoutIdentityLine(float name_ascent, float name_height, float detail_ascent, float detail_height, float row_height);
 
-// The Character page: the list, one character's editor, its appearance being prepared, or its appearance.
+// The Character page: the list, one character's editor, its appearance being prepared, its appearance or its inventory.
 class CharacterNav {
 public:
     bool editing() const { return open_ >= 0; }
     bool loading() const { return open_ >= 0 && view_ == View::kLoading; }
     bool appearance() const { return open_ >= 0 && view_ == View::kAppearance; }
+    bool inventory() const { return open_ >= 0 && view_ == View::kInventory; }
     int open() const { return open_; }
     void Open(int character) {
         open_ = character;
@@ -250,6 +330,12 @@ public:
     bool RequestAppearance() {
         if (open_ < 0 || view_ != View::kEditor) return false;
         view_ = View::kLoading;
+        return true;
+    }
+    // From the open character's editor only.
+    bool RequestInventory() {
+        if (open_ < 0 || view_ != View::kEditor) return false;
+        view_ = View::kInventory;
         return true;
     }
     void FinishAppearance(bool ready) {
@@ -262,7 +348,7 @@ public:
     }
 
 private:
-    enum class View { kEditor, kLoading, kAppearance };
+    enum class View { kEditor, kLoading, kAppearance, kInventory };
     int open_ = -1;
     View view_ = View::kEditor;
 };

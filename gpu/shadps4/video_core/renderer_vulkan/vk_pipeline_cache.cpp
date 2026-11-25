@@ -28,6 +28,7 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_depth_stencil_state.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
+#include "dcp_present.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -754,6 +755,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     if (is_new) {
         const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(sel.graphics_key);
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+        const auto compile_started = std::chrono::steady_clock::now();
         CompileTimer timer;
 
         GraphicsPipeline::SerializationSupport sdata{};
@@ -761,6 +763,26 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
 
         RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
+
+        const auto compile_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - compile_started)
+                                    .count();
+        if (compile_ms >= DcpPresent::kStallNotableMs) {
+            const auto& key = sel.graphics_key;
+            std::array<std::uint32_t, AmdGpu::NUM_COLOR_BUFFERS> color_sample_counts{};
+            for (u32 i = 0; i < key.num_color_attachments; ++i) {
+                color_sample_counts[i] = key.color_samples[i] ? key.color_samples[i] : 1u;
+            }
+            const bool has_depth_stencil =
+                key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid ||
+                key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid;
+            const bool mixed_samples = GpuCompat::NeedsMixedSamplesInfo(
+                GpuCompat::ChoosePipelineState(gpu_caps), key.num_samples,
+                color_sample_counts.data(), key.num_color_attachments, has_depth_stencil,
+                key.depth_samples);
+            DcpPresent::RecordPipelineStall("pipeline_cache_compile", compile_ms, -1, mixed_samples,
+                                            false);
+        }
 
         if (EmulatorSettings.IsShaderCollect()) {
             for (auto stage = 0; stage < MaxShaderStages; ++stage) {

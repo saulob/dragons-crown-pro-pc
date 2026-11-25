@@ -30,6 +30,7 @@ std::vector<WindowSize> WindowSizesFor(const DcpAspectRatio& aspect) {
 
 const char* PageName(PageId page) {
     switch (page) {
+    case PageId::kHome: return "Home";
     case PageId::kPlay: return "Play";
     case PageId::kDisplay: return "Display";
     case PageId::kGraphics: return "Graphics";
@@ -38,6 +39,7 @@ const char* PageName(PageId page) {
     case PageId::kControls: return "Controls";
     case PageId::kOnline: return "Online";
     case PageId::kTrophies: return "Trophies";
+    case PageId::kSave: return "Saves";
     case PageId::kEditor: return "Editor";
     case PageId::kBugReport: return "Bug Report";
     case PageId::kAbout: return "About";

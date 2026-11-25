@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dcp {
@@ -24,16 +25,24 @@ struct BackupInfo {
 std::optional<std::string> WriteSaveAtomically(const std::filesystem::path& target, std::span<const uint8_t> bytes,
                                                bool (*validate)(std::span<const uint8_t>, std::vector<std::string>&));
 
-// Copies SAVE0.DAT at `save0_path` into the backup folder. The backup name encodes the timestamp, title id and DATA-slot
-// folder and never overwrites an existing file. Returns the backup path, or empty on failure.
+// Copies SAVE0.DAT at `save0_path` into the backup folder. The backup name encodes the timestamp, title id and savedata
+// folder (reduced to plain tokens) and never overwrites an existing file. Returns the backup, or empty on failure.
 std::optional<BackupInfo> CreateBackup(const std::filesystem::path& backup_folder, const std::filesystem::path& save0_path,
                                        std::string_view title_id, std::string_view dir_name);
 
-// Lists the backups in a folder, newest first, with their metadata.
+// Lists the backups in a folder, newest first. A .meta without its .DAT, or over 4 KiB, is skipped; fields that are not
+// plain tokens read as empty.
 std::vector<BackupInfo> ListBackups(const std::filesystem::path& backup_folder);
 
-// Restores `backup` over `save0_path`, first backing up the current file. Returns an error string, empty on success.
+// Restores `backup` over `save0_path`, first backing up the current file under the destination's `title_id` and
+// `dir_name`. Returns an error string, empty on success.
 std::optional<std::string> RestoreBackup(const BackupInfo& backup, const std::filesystem::path& save0_path,
-                                         const std::filesystem::path& backup_folder);
+                                         const std::filesystem::path& backup_folder, std::string_view title_id,
+                                         std::string_view dir_name);
+
+// Deletes one backup (its .DAT and its .meta) of the save `title_id` / `dir_name`. The backup must be listed by ListBackups
+// in `backup_folder` for that save; anything else is refused and nothing else is touched. Returns an error string, empty on success.
+std::optional<std::string> DeleteBackup(const BackupInfo& backup, const std::filesystem::path& backup_folder,
+                                        std::string_view title_id, std::string_view dir_name);
 
 } // namespace dcp

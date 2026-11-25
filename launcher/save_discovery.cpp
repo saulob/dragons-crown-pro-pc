@@ -95,6 +95,36 @@ std::vector<DiscoveredSave> DiscoverSaves(const std::filesystem::path& user_dir,
     return saves;
 }
 
+std::vector<size_t> SavesOfTitle(std::span<const DiscoveredSave> saves, std::string_view title_id) {
+    std::vector<size_t> indexes;
+    if (title_id.empty()) {
+        return indexes;
+    }
+    for (size_t i = 0; i < saves.size(); ++i) {
+        if (saves[i].title_id == title_id) {
+            indexes.push_back(i);
+        }
+    }
+    return indexes;
+}
+
+int ChooseSave(std::span<const DiscoveredSave> saves, std::span<const size_t> visible,
+               std::span<const std::filesystem::path> preferred) {
+    for (const std::filesystem::path& path : preferred) {
+        for (const size_t index : visible) {
+            if (!path.empty() && saves[index].save0_path == path) {
+                return int(index);
+            }
+        }
+    }
+    for (const size_t index : visible) {
+        if (saves[index].model.valid()) {
+            return int(index);
+        }
+    }
+    return visible.empty() ? -1 : int(visible.front());
+}
+
 std::filesystem::path BackupFolder(const std::filesystem::path& user_dir) { return user_dir / "save_backups"; }
 
 } // namespace dcp

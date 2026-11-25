@@ -41,9 +41,9 @@ Inputs Base(uint64_t now) {
     return in;
 }
 
-Inputs Pad(uint64_t now, bool up, float sx = 0.0f, float sy = 0.0f) {
+Inputs Pad(uint64_t now, bool chord_down, float sx = 0.0f, float sy = 0.0f) {
     Inputs in = Base(now);
-    in.pad_up = up;
+    in.pad_buttons = chord_down ? static_cast<uint8_t>(comms::kPadBack | comms::kPadDpadUp) : 0;
     in.stick_x = sx;
     in.stick_y = sy;
     return in;
@@ -265,8 +265,8 @@ void TestHitMapping() {
 }
 
 void TestKeyBinding() {
-    CHECK(DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_HOTKEY_EXIT_GAME - 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 1 &&
-          DCP_KEY_HOTKEY_COMMS_WHEEL >= DCP_KEY_FIRST_HOTKEY);
+    CHECK(DCP_KEY_HOTKEY_COMMS_WHEEL == DCP_KEY_HOTKEY_EXIT_GAME - 1 && DCP_KEY_HOTKEY_EXIT_GAME == DCP_KEY_COUNT - 2 &&
+          DCP_KEY_HOTKEY_CHARACTER_HIGHLIGHT == DCP_KEY_COUNT - 1 && DCP_KEY_HOTKEY_COMMS_WHEEL >= DCP_KEY_FIRST_HOTKEY);
     CHECK(!std::strcmp(dcp_key_actions[DCP_KEY_HOTKEY_COMMS_WHEEL].ini_key, "hotkey_comms_wheel"));
     CHECK(!std::strcmp(dcp_key_actions[DCP_KEY_HOTKEY_COMMS_WHEEL].label, "Comms Wheel"));
     DcpKeyMap map;
@@ -281,7 +281,7 @@ void TestKeyBinding() {
     const std::string settings = ReadSource("gpu/shim/dcp_settings.h");
     CHECK(settings.find("comms_key{SDL_SCANCODE_T}") != std::string::npos);
     const std::string settings_cpp = ReadSource("gpu/shim/dcp_settings.cpp");
-    CHECK(settings_cpp.find("&v.window_mode_key, &v.comms_key, &v.exit_key}") != std::string::npos);
+    CHECK(settings_cpp.find("&v.window_mode_key, &v.comms_key, &v.exit_key, &v.character_highlight_key}") != std::string::npos);
     for (const char* file : {"gpu/shim/dcp_comms_wheel.cpp", "gpu/shim/dcp_comms_wheel.h", "src/runtime_pad.c", "gpu/shim/dcp_overlay.cpp"}) {
         CHECK(ReadSource(file).find("SDL_SCANCODE_T") == std::string::npos);
     }
@@ -324,12 +324,48 @@ void TestNeedHelpIcon() {
     CHECK(ReadSource("gpu/shim/dcp_comms_wheel.cpp").find("id % kAtlasColumns") != std::string::npos);
 }
 
+void TestControllerShortcutDCP_TWGQWK() {
+    Driver driver;
+    Inputs bare_up = Base(100);
+    bare_up.pad_buttons = comms::kPadDpadUp;
+    Outputs out = driver.Step(bare_up);
+    CHECK(!driver.Latest().open && !out.hide_pad_up && out.hide_pad_buttons == 0);
+
+    Inputs chord = Base(116);
+    chord.pad_buttons = static_cast<uint8_t>(comms::kPadBack | comms::kPadDpadUp);
+    out = driver.Step(chord);
+    CHECK(driver.Latest().open && out.hide_pad_up &&
+          out.hide_pad_buttons == static_cast<uint8_t>(comms::kPadBack | comms::kPadDpadUp));
+
+    Inputs off_in = Base(200);
+    off_in.controller_shortcut = comms::kControllerShortcutOff;
+    off_in.pad_buttons = static_cast<uint8_t>(comms::kPadBack | comms::kPadDpadUp);
+    Driver off_driver;
+    out = off_driver.Step(off_in);
+    CHECK(!off_driver.Latest().open && !out.hide_pad_up && out.hide_pad_buttons == 0);
+
+    Inputs legacy = Base(300);
+    legacy.controller_shortcut = comms::kControllerShortcutLegacyDpadUp;
+    legacy.pad_buttons = comms::kPadDpadUp;
+    Driver legacy_driver;
+    out = legacy_driver.Step(legacy);
+    CHECK(legacy_driver.Latest().open && out.hide_pad_up && out.hide_pad_buttons == comms::kPadDpadUp);
+
+    CHECK(ReadSource("gpu/shim/dcp_settings.h").find("comms_wheel_chord{0}") != std::string::npos);
+    CHECK(ReadSource("gpu/shim/dcp_settings.cpp").find("dcp::comms::kControllerShortcutKey") != std::string::npos);
+    CHECK(ReadSource("gpu/shim/dcp_comms_wheel.cpp").find("DcpSettings::Get().comms_wheel_chord") != std::string::npos);
+    const std::string pad = ReadSource("src/runtime_pad.c");
+    CHECK(pad.find("DCP_COMMS_PAD_BACK") != std::string::npos && pad.find("out.hide_pad_buttons") != std::string::npos);
+    std::printf("DCP-TWGQWK wheel ui regression passed\n");
+}
+
 } // namespace
 
 int main() {
     TestControllerLatches();
     TestControllerCancel();
     TestNothingSelectedKeepsOpen();
+    TestControllerShortcutDCP_TWGQWK();
     TestKeyboardOpenAndMouseConfirm();
     TestKeyboardCancel();
     TestKeyboardNavigation();

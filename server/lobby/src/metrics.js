@@ -2,6 +2,7 @@
 // per platform, version and country, and 15-minute usage samples. No row names a player, an account, an address or a
 // room, and nothing here keeps per-session state: live numbers come from the lobby's sockets and tables. Who used Early
 // Story Online is kept apart, in story_usage.js.
+import { DIFFICULTIES } from './difficulty.js';
 import { MAX_PARTY, PARTY_DIMENSIONS, partyCounts } from './party.js';
 
 export { MAX_PARTY };
@@ -9,8 +10,9 @@ export const METRICS_TIME_ZONE = 'America/Sao_Paulo';
 export const SAMPLE_MS = 15 * 60 * 1000;
 export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
+export const SHOWCASE_DAYS = 30;
 export const DIMENSIONS = ['platform', 'platform_mix', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime',
-  ...PARTY_DIMENSIONS];
+  'difficulty', ...PARTY_DIMENSIONS];
 export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
 export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
   'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
@@ -138,8 +140,9 @@ export class Metrics {
   }
 
   // A room whose last seat is gone: `peak` seats at most were taken (0: unknown, not counted), `relayed` when the relay
-  // carried a frame of it.
-  roomClosed({ peak, lifetimeMs, relayed, platforms = 0 }) {
+  // carried a frame of it, `difficulty` what its host reported at creation. Only a multiplayer room with a known
+  // difficulty is counted by difficulty; the rest of the rooms that ended with a guest are the unknown ones.
+  roomClosed({ peak, lifetimeMs, relayed, platforms = 0, difficulty = '' }) {
     if (!Number.isInteger(peak) || peak < 1) return;
     const day = metricsDay(this.now());
     const party = Math.min(peak, MAX_PARTY);
@@ -150,6 +153,7 @@ export class Metrics {
       ON CONFLICT(day) DO UPDATE SET ${columns.map((c) => `${c} = ${c} + excluded.${c}`).join(', ')}`, day,
     ...Object.values(added));
     if (party > 1 && platforms) this.addDimension(day, 'platform_mix', platformMix(platforms));
+    if (party > 1 && DIFFICULTIES.includes(difficulty)) this.addDimension(day, 'difficulty', difficulty);
     this.addDimension(day, 'occupancy', String(party));
     this.addDimension(day, 'lifetime', LIFETIMES.find(([, limit]) => (Number(lifetimeMs) || 0) < limit)[0]);
   }
@@ -220,7 +224,7 @@ export class Metrics {
   summary(live) {
     const now = this.now();
     const day = metricsDay(now);
-    const today = this.sql.get(`SELECT ${DAY_COLUMNS.join(', ')} FROM metrics_daily WHERE day = ?`, day) ?? emptyDay();
+    const today = this.todayRow();
     return {
       generated: now,
       time_zone: METRICS_TIME_ZONE,
@@ -255,10 +259,42 @@ export class Metrics {
       sampleBucket(since));
     const partyFirst = this.sql.get(`SELECT MIN(day) AS day FROM metrics_daily_dimensions WHERE dimension = 'party_size'`).day;
     const mixFirst = this.sql.get(`SELECT MIN(day) AS day FROM metrics_daily_dimensions WHERE dimension = 'platform_mix'`).day;
+    const difficultyFirst = this.sql.get(`SELECT MIN(day) AS day FROM metrics_daily_dimensions WHERE dimension = 'difficulty'`).day;
     const totals = this.totals(first, last);
     const previous = this.totals(daysBefore(first, days), daysBefore(first, 1));
     return { generated: now, time_zone: METRICS_TIME_ZONE, days, first, last, sample_ms: SAMPLE_MS, daily, dimensions,
-      party_first_day: partyFirst ?? null, platform_mix_first_day: mixFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
+      party_first_day: partyFirst ?? null, platform_mix_first_day: mixFirst ?? null, difficulty_first_day: difficultyFirst ?? null, samples, totals, previous, comparison: compare(totals, previous) };
+  }
+
+  todayRow() {
+    return this.sql.get(`SELECT ${DAY_COLUMNS.join(', ')} FROM metrics_daily WHERE day = ?`, metricsDay(this.now())) ?? emptyDay();
+  }
+
+  showcaseToday() {
+    const today = this.todayRow();
+    return { sessions: today.sessions, rooms_created: today.rooms_created, joins: today.room_joins };
+  }
+
+  showcaseMonth() {
+    const last = metricsDay(this.now());
+    const first = daysBefore(last, SHOWCASE_DAYS - 1);
+    const period = this.totals(first, last);
+    const parties = this.sql.get(`SELECT COALESCE(SUM(count), 0) AS reports, COALESCE(SUM(CAST(value AS INTEGER) * count), 0) AS seats
+      FROM metrics_daily_dimensions WHERE dimension = 'party_size' AND day >= ? AND day <= ?`, first, last);
+    return { first, last, rooms_created: period.rooms_created, successful_joins: period.room_joins,
+      parties_reported: parties.reports,
+      average_party_size: parties.reports > 0 ? Math.round(100 * parties.seats / parties.reports) / 100 : null,
+      rooms_with_guest: period.rooms_with_guest };
+  }
+
+  showcaseLifetime() {
+    return this.sql.get(`SELECT COALESCE(SUM(sessions), 0) AS sessions, MIN(CASE WHEN sessions > 0 THEN day END) AS since
+      FROM metrics_daily`);
+  }
+
+  classUsage(first, last) {
+    return this.sql.all(`SELECT value AS class, SUM(count) AS count FROM metrics_daily_dimensions
+      WHERE dimension = 'character' AND day >= ? AND day <= ? GROUP BY value ORDER BY count DESC, value`, first, last);
   }
 
   // Early Story Online rooms created and guest joins since the columns exist; the dashboard sums them, never a period.

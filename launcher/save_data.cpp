@@ -82,6 +82,15 @@ std::string_view ClassName(CharacterClass klass) {
     return "Unknown";
 }
 
+std::string_view DifficultyName(uint8_t value) {
+    const DcpDifficulty difficulty = dcp_difficulty_of(value);
+    return difficulty == DCP_DIFFICULTY_UNKNOWN ? std::string_view() : std::string_view(dcp_difficulty_name(difficulty));
+}
+
+bool IsEditableDifficulty(int value) {
+    return std::ranges::find(kEditableDifficulties, value) != kEditableDifficulties.end();
+}
+
 CharacterClass ClassFromId(uint8_t id) {
     switch (id) {
     case 0: return CharacterClass::kFighter;
@@ -140,8 +149,15 @@ SaveModel SaveModel::FromBytes(std::span<const uint8_t> bytes) {
             record.skill_points = ReadU16(model.bytes_, record.record_offset + kCharSkillPoints);
             record.hp_current = ReadU16(model.bytes_, record.record_offset + kCharHpCurrent);
             record.hp_max = ReadU16(model.bytes_, record.record_offset + kCharHpMax);
+            record.stats.strength = ReadU16(model.bytes_, record.record_offset + kCharStrength);
+            record.stats.intelligence = ReadU16(model.bytes_, record.record_offset + kCharIntelligence);
+            record.stats.dexterity = ReadU16(model.bytes_, record.record_offset + kCharDexterity);
+            record.stats.luck = ReadU16(model.bytes_, record.record_offset + kCharLuck);
+            record.stats.constitution = ReadU16(model.bytes_, record.record_offset + kCharConstitution);
+            record.stats.magic_resistance = ReadU16(model.bytes_, record.record_offset + kCharMagicResistance);
             record.klass = ClassFromId(model.bytes_[record.record_offset + kCharClass]);
             record.color = model.bytes_[record.record_offset + kCharColor];
+            record.difficulty = model.bytes_[record.record_offset + kCharDifficulty];
             const size_t name_offset = record.record_offset + kCharName;
             size_t length = 0;
             while (length < kCharNameBytes && model.bytes_[name_offset + length] != 0) {
@@ -232,6 +248,22 @@ bool SaveModel::SetHp(int slot, int character, uint16_t current, uint16_t max) {
     return true;
 }
 
+bool SaveModel::SetStats(int slot, int character, const CharacterStats& stats) {
+    const DataSlotView* data = Slot(slot);
+    if (!data || character < 0 || character >= static_cast<int>(kCharacterCount) || !data->characters[character].present) {
+        return false;
+    }
+    const size_t record = data->characters[character].record_offset;
+    WriteU16(bytes_, record + kCharStrength, stats.strength);
+    WriteU16(bytes_, record + kCharIntelligence, stats.intelligence);
+    WriteU16(bytes_, record + kCharDexterity, stats.dexterity);
+    WriteU16(bytes_, record + kCharLuck, stats.luck);
+    WriteU16(bytes_, record + kCharConstitution, stats.constitution);
+    WriteU16(bytes_, record + kCharMagicResistance, stats.magic_resistance);
+    slots_[slot].characters[character].stats = stats;
+    return true;
+}
+
 bool SaveModel::SetName(int slot, int character, std::string_view utf8_name) {
     if (utf8_name.empty() || utf8_name.size() > kCharNameBytes) {
         return false;
@@ -267,6 +299,17 @@ bool SaveModel::SetColor(int slot, int character, int color) {
     return true;
 }
 
+bool SaveModel::SetDifficulty(int slot, int character, int difficulty) {
+    const DataSlotView* data = Slot(slot);
+    if (!IsEditableDifficulty(difficulty) || !data || character < 0 || character >= static_cast<int>(kCharacterCount) ||
+        !data->characters[character].present) {
+        return false;
+    }
+    bytes_[data->characters[character].record_offset + kCharDifficulty] = static_cast<uint8_t>(difficulty);
+    slots_[slot].characters[character].difficulty = static_cast<uint8_t>(difficulty);
+    return true;
+}
+
 std::vector<uint8_t> SaveModel::Serialize() const {
     std::vector<uint8_t> result = bytes_;
     WriteU32(result, kSaveCrcOffset, SaveCrc32(result));
@@ -292,7 +335,13 @@ std::string DescribeSave(const SaveModel& model) {
             text += "\n  [" + std::to_string(character.slot + 1) + "] " + character.name + " " +
                     std::string(ClassName(character.klass)) + " Lv " + std::to_string(SaveModel::DisplayedLevel(character.level_stored)) +
                     " Color " + std::to_string(character.color) + " SP " + std::to_string(character.skill_points) +
-                    " HP " + std::to_string(character.hp_current) + "/" + std::to_string(character.hp_max);
+                    " HP " + std::to_string(character.hp_current) + "/" + std::to_string(character.hp_max) +
+                    " STR " + std::to_string(character.stats.strength) +
+                    " CON " + std::to_string(character.stats.constitution) +
+                    " DEX " + std::to_string(character.stats.dexterity) +
+                    " INT " + std::to_string(character.stats.intelligence) +
+                    " MGR " + std::to_string(character.stats.magic_resistance) +
+                    " LUC " + std::to_string(character.stats.luck);
         }
     }
     return text;

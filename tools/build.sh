@@ -6,6 +6,12 @@
 #   tools/build.sh --clean    delete build/cmake/linux first
 #   tools/build.sh --test     also build and run the focused tests
 #   tools/build.sh --editor   build and run only the Character Editor release tests (no game build)
+#   tools/build.sh --launcher build and run only the launcher tests (no game build)
+#   tools/build.sh --steam-deck-input build and run only the Steam Deck input tests (no game build)
+#   tools/build.sh --vulkan-pipeline  build and run only the Vulkan pipeline and presenter tests (no game build)
+#   tools/build.sh --localization     build and run only the localization and text tests (no game build)
+#   tools/build.sh --korean-localization build and run only the Korean Menu & Subtitles tests (no game build)
+#   tools/build.sh --manual-visual    build and run only the PT-BR manual visual tests (no game build)
 #   tools/build.sh --run [args...]   start the loader that was just built (arguments after --run go to it)
 #
 # Missing tools or libraries are listed; packaging/linux/ci-deps.sh installs them on Ubuntu 20.04 (the release baseline).
@@ -13,15 +19,21 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=$root/build/cmake/linux
 config=RelWithDebInfo
-clean=0 test=0 editor=0 run=0
+clean=0 test=0 editor=0 launcher=0 steam_deck_input=0 vulkan_pipeline=0 localization=0 korean=0 manual_visual=0 run=0
 loader_args=()
 while (($#)); do
     case $1 in
         --clean) clean=1 ;;
         --test) test=1 ;;
         --editor) editor=1 ;;
+        --launcher) launcher=1 ;;
+        --steam-deck-input) steam_deck_input=1 ;;
+        --vulkan-pipeline) vulkan_pipeline=1 ;;
+        --localization) localization=1 ;;
+        --korean-localization) korean=1 ;;
+        --manual-visual) manual_visual=1 ;;
         --run) run=1; shift; loader_args=("$@"); break ;;
-        -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -97,18 +109,86 @@ if ! grep -qs "CMAKE_BUILD_TYPE:STRING=$config" "$build_dir/CMakeCache.txt" || [
 fi
 if ((editor)); then
     step 'Building the Character Editor release tests'
-    ninja -C "$build_dir" dcp-save-editor-tests dcp-runtime-overlay-tests dcp-appearance-online-tests
+    ninja -C "$build_dir" dcp-save-editor-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-runtime-overlay-tests dcp-appearance-online-tests
     step 'Running the runtime file overlay tests (borrowed patch data, read observer, swapped data, layered overlays)'
     "$build_dir/bin/dcp-runtime-overlay-tests"
     step 'Running the online appearance tests (recipe, room session, remote textures, seat-aware hooks)'
     "$build_dir/bin/dcp-appearance-online-tests"
     step 'Running the Character Editor release groups'
     "$build_dir/bin/dcp-save-editor-tests" release
+    step 'Running the Inventory Editor tests'
+    "$build_dir/bin/dcp-inventory-editor-tests"
+    step 'Running the F3K8S character stat override tests'
+    "$build_dir/bin/dcp-character-override-tests"
+    exit 0
+fi
+if ((launcher)); then
+    step 'Building the launcher tests'
+    ninja -C "$build_dir" dcp-launcher-tests
+    step 'Running the launcher tests'
+    "$build_dir/bin/dcp-launcher-tests"
+    exit 0
+fi
+if ((steam_deck_input)); then
+    step 'Building the Steam Deck input tests'
+    ninja -C "$build_dir" dcp-steam-deck-trackpad-tests dcp-mouse-tests dcp-cursor-tests dcp-touchscreen-steamos-tests dcp-sdl-compat-tests
+    step 'Running the Steam Deck trackpad tests'
+    "$build_dir/bin/dcp-steam-deck-trackpad-tests"
+    step 'Running the mouse input tests'
+    "$build_dir/bin/dcp-mouse-tests"
+    step 'Running the cursor visibility tests'
+    "$build_dir/bin/dcp-cursor-tests"
+    step 'Running the SteamOS touchscreen tests'
+    "$build_dir/bin/dcp-touchscreen-steamos-tests"
+    step 'Running the SDL compat tests'
+    "$build_dir/bin/dcp-sdl-compat-tests"
+    exit 0
+fi
+if ((vulkan_pipeline)); then
+    step 'Building the Vulkan pipeline and presenter tests'
+    ninja -C "$build_dir" dcp-gpu-compat-tests dcp-pipeline-cache-tests dcp-present-tests dcp-frame-pacing-tests
+    step 'Running the GPU compatibility tests'
+    "$build_dir/bin/dcp-gpu-compat-tests"
+    step 'Running the pipeline cache tests'
+    "$build_dir/bin/dcp-pipeline-cache-tests"
+    step 'Running the present tests'
+    "$build_dir/bin/dcp-present-tests"
+    step 'Running the frame pacing tests'
+    "$build_dir/bin/dcp-frame-pacing-tests"
+    exit 0
+fi
+if ((manual_visual)); then
+    step 'Building the launcher manual visual tests'
+    ninja -C "$build_dir" dcp-launcher-tests
+    step 'Running the launcher manual visual tests'
+    "$build_dir/bin/dcp-launcher-tests" manual-visual
+    exit 0
+fi
+if ((localization)); then
+    step 'Building the localization and text tests'
+    ninja -C "$build_dir" dcp-launcher-tests dcp-text-tests
+    step 'Running the launcher localization tests'
+    "$build_dir/bin/dcp-launcher-tests" localization
+    step 'Running the text tests'
+    "$build_dir/bin/dcp-text-tests"
+    exit 0
+fi
+if ((korean)); then
+    step 'Building the Korean Menu & Subtitles tests'
+    ninja -C "$build_dir" dcp-korean-localization-tests dcp-launcher-tests dcp-build-parity-tests dcp-text-tests
+    step 'Running the Korean localization tests (profiles, corpus, Hangul atlas and glyph table)'
+    "$build_dir/bin/dcp-korean-localization-tests"
+    step 'Running the Korean launcher tests (language lists, saved Korean, Europe profile, voice choices)'
+    "$build_dir/bin/dcp-launcher-tests" korean
+    step 'Running the Korean build parity tests (contract, Europe profile, real USA corpus and glyph table)'
+    "$build_dir/bin/dcp-build-parity-tests" korean
+    step 'Running the text tests (Noto Sans KR only for the port Korean)'
+    "$build_dir/bin/dcp-text-tests"
     exit 0
 fi
 step 'Building'
 targets=(dragons_crown_pro)
-((test)) && targets+=(dcp-launcher-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-save-editor-tests dcp-test-progress-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-comms-wheel-ui-tests dcp-runtime-tests dcp-sigpipe-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-skip-intro-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests)
+((test)) && targets+=(dcp-launcher-tests dcp-korean-localization-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-comms-wheel-ui-tests dcp-runtime-tests dcp-sigpipe-tests dcp-text-tests dcp-savedata-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests)
 ninja -C "$build_dir" "${targets[@]}"
 loader=$build_dir/bin/dragons_crown_pro
 [[ -x $loader ]] || die "Missing $loader"
@@ -116,6 +196,8 @@ loader=$build_dir/bin/dragons_crown_pro
 if ((test)); then
     step 'Running the launcher tests'
     "$build_dir/bin/dcp-launcher-tests"
+    step 'Running the Korean localization tests (USA and Europe profiles, corpus, Hangul atlas and glyph table)'
+    "$build_dir/bin/dcp-korean-localization-tests"
     step 'Running the unsupported-build diagnostics tests'
     "$build_dir/bin/dcp-build-diagnostics-tests"
     step 'Running the build feature parity tests (contract, update parity, mappings, unknown builds)'
@@ -136,6 +218,8 @@ if ((test)); then
     "$build_dir/bin/dcp-system-type-tests"
     step 'Running the online party snapshot tests'
     "$build_dir/bin/dcp-party-tests"
+    step 'Running the DCP-YYM3TL online Inn report-adventurers thread lifecycle tests'
+    "$build_dir/bin/dcp-thread-lifecycle-tests"
     step 'Running the Comms Wheel tests'
     "$build_dir/bin/dcp-comms-tests"
     step 'Running the Comms Wheel session tests (rules, telemetry batching, the real send entry point)'
@@ -162,6 +246,12 @@ if ((test)); then
     "$build_dir/bin/dcp-test-progress-tests"
     step 'Running the Character Editor release groups (saves, identity, looks, art, composition with the translation overlay)'
     "$build_dir/bin/dcp-save-editor-tests" release
+    step 'Running the F3K8S character stat override tests'
+    "$build_dir/bin/dcp-character-override-tests"
+    step 'Running the Save page tests'
+    "$build_dir/bin/dcp-save-page-tests"
+    step 'Running the Inventory Editor tests'
+    "$build_dir/bin/dcp-inventory-editor-tests"
     step 'Running the cursor visibility tests'
     "$build_dir/bin/dcp-cursor-tests"
     step 'Running the mouse input tests (full mouse rebinding, Pointer Control Hold / Always On, Steam Deck trackpad behavior, touchscreen behavior, controller ownership)'
@@ -187,6 +277,8 @@ if ((test)); then
     "$build_dir/bin/dcp-pipeline-cache-tests"
     step 'Running the GPU compatibility tests (interpolation route, integer fix, dynamic state, feedback loop, mixed samples)'
     "$build_dir/bin/dcp-gpu-compat-tests"
+    step 'Running the Issue #84 Adreno regression tests (feedback snapshot fallback, provoking pass break, static pipeline key audit, cache invalidation, diagnostics)'
+    "$build_dir/bin/dcp-issue84-tests"
     step 'Running the water diagnostics tests (AMD only, deduplication, cap)'
     "$build_dir/bin/dcp-water-diag-tests"
     step 'Running the narrow water reader tests'
@@ -215,8 +307,12 @@ if ((test)); then
     "$build_dir/bin/dcp-rtc-tests"
     step 'Running the Skip Offer tests (synthetic and local boot images)'
     "$build_dir/bin/dcp-skip-offers-tests"
+    step 'Running the item attack cap tests'
+    "$build_dir/bin/dcp-item-attack-cap-tests"
     step 'Running the Skip Intro tests (startup logos, opening movie, first boot, title transition, all builds)'
     "$build_dir/bin/dcp-skip-intro-tests"
+    step 'Running the Character Highlight tests (setting, F7 hotkey, atlas signature table, runtime image match)'
+    "$build_dir/bin/dcp-character-highlight-tests"
     "$build_dir/bin/dcp-gallery-unlock-tests"
     "$build_dir/bin/dcp-endgame-unlocks-tests"
     "$build_dir/bin/dcp-boss-battle-tests"
@@ -245,8 +341,17 @@ fi
 
 view=$root/game/prepared/v1.03 image=$root/build/image/v1.03
 if [[ -f $view/.dcp_view.json ]]; then
+    rebuild=0
     if [[ ! -f $image/boot.bin || $view/.dcp_view.json -nt $image/boot.bin ||
-          $root/launcher/boot_image.cpp -nt $image/boot.bin || $root/launcher/game_profile.h -nt $image/boot.bin ]]; then
+          $root/launcher/boot_image.cpp -nt $image/boot.bin || $root/launcher/game_profile.h -nt $image/boot.bin ||
+          $root/launcher/atlas_signatures.cpp -nt $image/boot.bin || $root/src/character_highlight_core.h -nt $image/boot.bin ]]; then
+        rebuild=1
+    fi
+    atlas=$image/atlas-signatures.txt
+    if [[ -f $view/DRACRO.CPK && ( ! -f $atlas || $atlas -ot $image/boot.bin ) ]]; then
+        rebuild=1
+    fi
+    if ((rebuild)); then
         step 'Updating the boot image'
         "$loader" --prepare-image "$view" "$image"
     fi

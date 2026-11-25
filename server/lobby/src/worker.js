@@ -6,6 +6,9 @@ import { COUNTRY_HEADER, handleAdmin, internalIncidentRoute, internalMetricsRout
 import { handleUpgrade } from './edge.js';
 import { INCIDENT } from './incidents.js';
 import { Lobby, PROTOCOL } from './lobby.js';
+import { STATS_PATH, statsHandler } from './stats.js';
+
+const serveStats = statsHandler();
 
 class WorkerConn {
   constructor(ws, ctx) {
@@ -92,6 +95,7 @@ export class LobbyObject extends DurableObject {
     }
     const metrics = internalMetricsRoute(request);
     if (metrics?.kind === 'summary') return Response.json(this.lobby.metricsSummary());
+    if (metrics?.kind === 'showcase') return Response.json(this.lobby.showcase());
     if (metrics?.kind === 'history') return Response.json(this.lobby.metricsHistory(metrics.days));
     if (metrics) return new Response('Bad request', { status: 400 });
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('Not found', { status: 404 });
@@ -139,11 +143,14 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const stub = env.LOBBY.get(env.LOBBY.idFromName('global'));
+    const internal = (path) => stub.fetch(`https://lobby.internal${path}`).then((r) => {
+      if (!r.ok) throw new Error(`lobby answered ${r.status}`);
+      return r.json();
+    });
+    if (url.pathname === STATS_PATH && request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      return serveStats(request, () => internal('/metrics/showcase'));
+    }
     if (isAdminPath(url.pathname)) {
-      const internal = (path) => stub.fetch(`https://lobby.internal${path}`).then((r) => {
-        if (!r.ok) throw new Error(`lobby answered ${r.status}`);
-        return r.json();
-      });
       const report = (path, init, read = (r) => r.json()) => stub.fetch(`https://lobby.internal${path}`, init).then((r) => {
         if (r.status === 404) return null;
         if (!r.ok) throw new Error(`lobby answered ${r.status}`);

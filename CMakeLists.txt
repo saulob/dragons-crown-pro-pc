@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dragons_crown_pro_pc VERSION 1.4.1 LANGUAGES C CXX)
+project(dragons_crown_pro_pc VERSION 1.5.0 LANGUAGES C CXX)
 set(DCP_PORT_VERSION "${PROJECT_VERSION}")
 
 if (NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -40,7 +40,8 @@ find_package(Freetype REQUIRED)
 find_package(Threads REQUIRED)
 
 # Keyboard and mouse bindings and the mouse and touch input state shared by the launcher, the runtime pad and the video core.
-add_library(dcp_keys STATIC src/dcp_keys.c src/dcp_mouse.c src/dcp_touchscreen.c src/dcp_pointer_motion.c src/dcp_pad_owner.c)
+add_library(dcp_keys STATIC src/character_highlight.cpp src/dcp_keys.c src/dcp_mouse.c src/dcp_touchscreen.c src/dcp_pointer_motion.c src/dcp_pad_owner.c)
+set_target_properties(dcp_keys PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_include_directories(dcp_keys PUBLIC src)
 target_link_libraries(dcp_keys PUBLIC SDL3::SDL3)
 target_compile_options(dcp_keys PRIVATE -Wall -Wextra -Werror)
@@ -98,6 +99,7 @@ set(DCP_RUNTIME_SOURCES
     src/appearance_hooks.c
     src/appearance_net.cpp
     src/appearance_session.cpp
+    src/hp_override_hooks.c
     src/default_message_hook.c
     src/guest_hook.c
     src/inn_layout.c
@@ -128,9 +130,10 @@ set(DCP_RUNTIME_SOURCES
 # The built-in system fonts are assembled into runtime_font.c (.incbin): rebuild it when a font changes.
 set(DCP_NOTO_SANS ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSans-Regular.ttf)
 set(DCP_NOTO_SANS_TC ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSansTC-Regular.otf)
+set(DCP_NOTO_SANS_KR ${CMAKE_SOURCE_DIR}/third_party/fonts/NotoSansKR-Regular.otf)
 set_source_files_properties(src/runtime_font.c PROPERTIES
-    COMPILE_DEFINITIONS "DCP_NOTO_SANS_PATH=\"${DCP_NOTO_SANS}\";DCP_NOTO_SANS_TC_PATH=\"${DCP_NOTO_SANS_TC}\""
-    OBJECT_DEPENDS "${DCP_NOTO_SANS};${DCP_NOTO_SANS_TC}")
+    COMPILE_DEFINITIONS "DCP_NOTO_SANS_PATH=\"${DCP_NOTO_SANS}\";DCP_NOTO_SANS_TC_PATH=\"${DCP_NOTO_SANS_TC}\";DCP_NOTO_SANS_KR_PATH=\"${DCP_NOTO_SANS_KR}\""
+    OBJECT_DEPENDS "${DCP_NOTO_SANS};${DCP_NOTO_SANS_TC};${DCP_NOTO_SANS_KR}")
 
 if (WIN32)
     enable_language(RC)
@@ -148,7 +151,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/simulate_crash.c src/cheat_hooks.cpp src/kraken_fix.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/simulate_crash.c src/cheat_hooks.cpp src/kraken_fix.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/item_attack_cap.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -181,6 +184,9 @@ add_custom_command(TARGET dragons_crown_pro POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/header-art.png"
         "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/header-art.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/home_background.png"
+        "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/home_background.png"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/launcher/sponsor-heart.png"
         "$<TARGET_FILE_DIR:dragons_crown_pro>/assets/launcher/sponsor-heart.png"
@@ -216,6 +222,13 @@ target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-online-hle-tests PRIVATE -Wall -Wextra)
 
+# Focused tests of the Item Attack Cap patch, on synthetic images and the local boot images (tools/test.ps1);
+# not part of the default build.
+add_executable(dcp-item-attack-cap-tests EXCLUDE_FROM_ALL tests/item_attack_cap_tests.c src/item_attack_cap.c)
+target_include_directories(dcp-item-attack-cap-tests PRIVATE src)
+target_compile_definitions(dcp-item-attack-cap-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-item-attack-cap-tests PRIVATE -Wall -Wextra -Werror)
+
 # Focused tests of the Story and Tutorial Skip Offers, on synthetic images and the local boot images (tools/test.ps1);
 # not part of the default build.
 add_executable(dcp-skip-offers-tests EXCLUDE_FROM_ALL tests/skip_offers_tests.c src/skip_offers.c)
@@ -227,6 +240,12 @@ target_include_directories(dcp-simulate-crash-tests PRIVATE src)
 target_compile_definitions(dcp-simulate-crash-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-simulate-crash-tests PRIVATE -Wall -Wextra -Werror)
 
+# Character Highlight: setting, F7 hotkey, atlas signature table and the runtime image match (tools/test.ps1).
+add_executable(dcp-character-highlight-tests EXCLUDE_FROM_ALL tests/character_highlight_tests.cpp gpu/shim/dcp_settings.cpp)
+set_target_properties(dcp-character-highlight-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-character-highlight-tests PRIVATE src launcher tests gpu/shim)
+target_compile_definitions(dcp-character-highlight-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(dcp-character-highlight-tests PRIVATE dcp_launcher_core dcp_keys)
 add_executable(dcp-skip-intro-tests EXCLUDE_FROM_ALL tests/skip_intro_tests.c src/skip_intro.c src/guest_hook.c)
 target_include_directories(dcp-skip-intro-tests PRIVATE src)
 target_compile_definitions(dcp-skip-intro-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -557,6 +576,14 @@ target_include_directories(dcp-gpu-compat-tests PRIVATE gpu/shadps4)
 target_compile_definitions(dcp-gpu-compat-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-gpu-compat-tests PRIVATE -Wall -Wextra -Werror)
 
+# Focused Issue #84 regression tests (feedback-loop snapshot fallback, provoking pass breaks, pipeline key audit,
+# cache version invalidation, bounded Qualcomm diagnostics); not part of the default build.
+add_executable(dcp-issue84-tests EXCLUDE_FROM_ALL tests/issue84_tests.cpp)
+set_target_properties(dcp-issue84-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-issue84-tests PRIVATE gpu/shadps4 gpu/shim)
+target_compile_definitions(dcp-issue84-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-issue84-tests PRIVATE -Wall -Wextra -Werror)
+
 # Focused tests of the issue #32 water diagnostics (classification, deduplication, the cap); not part of the default build.
 add_executable(dcp-water-diag-tests EXCLUDE_FROM_ALL tests/water_diag_tests.cpp)
 set_target_properties(dcp-water-diag-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
@@ -705,4 +732,16 @@ if (NOT WIN32)
     add_executable(dcp-sigpipe-tests EXCLUDE_FROM_ALL tests/sigpipe_tests.c)
     target_compile_definitions(dcp-sigpipe-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_compile_options(dcp-sigpipe-tests PRIVATE -Wall -Wextra -Werror)
+endif()
+
+# DCP-YYM3TL: the detached guest thread cancel/join lifecycle (tools/test.ps1); not part of the default build.
+add_executable(dcp-thread-lifecycle-tests EXCLUDE_FROM_ALL tests/thread_lifecycle_tests.c src/runtime_thread.c)
+if (WIN32)
+    target_sources(dcp-thread-lifecycle-tests PRIVATE src/compat_win.c)
+endif()
+target_include_directories(dcp-thread-lifecycle-tests PRIVATE src)
+target_compile_options(dcp-thread-lifecycle-tests PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(dcp-thread-lifecycle-tests PRIVATE Threads::Threads)
+if (WIN32)
+    target_link_libraries(dcp-thread-lifecycle-tests PRIVATE bcrypt)
 endif()

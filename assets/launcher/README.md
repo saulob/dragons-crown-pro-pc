@@ -33,8 +33,15 @@ rsvg-convert -w 64 -h 64 -f png -o assets/launcher/sponsor-heart.png assets/laun
 
 The launcher draws it before the button label, as a square slightly taller than the label's text.
 
+# Home background
+
+`home_background.png` is the runtime artwork of the Home page, AI-generated for the Dragon's Crown Pro PC launcher
+Home: ancient stone ruins, a river and waterfall under a golden sunset, and a fantasy kingdom on the right. It is not
+official Dragon's Crown artwork. 1672x941, no source file. The launcher crops it to the Home panel anchored to the
+right edge, darkens it and draws it nowhere else (`launcher/home_art.h`).
+
 # Page icons
 
-`icons/` holds the sidebar's ten SVGs, the source of truth, with one file per page and no rendered copies. They are
+`icons/` holds the sidebar's thirteen SVGs and the three Editor button SVGs (`appearance.svg`, `inventory.svg`, `back.svg`), the source of truth, with no rendered copies. They are
 compiled into the launcher (`launcher/page_icons.cpp`), so they ship in no package as loose files. `icons/SOURCES.md`
 records where each one came from and its license.

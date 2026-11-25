@@ -47,11 +47,12 @@ $loadExecExit = 30 # dragons_crown_pro: sceSystemServiceLoadExec ended the proce
 # Rebuilt when the game was installed again or the boot image builder changed.
 function Test-ImageCurrent {
     $newest = (Get-Item -LiteralPath $marker).LastWriteTime
-    foreach ($source in 'launcher\boot_image.cpp', 'launcher\game_profile.h') {
+    foreach ($source in 'launcher\boot_image.cpp', 'launcher\game_profile.h', 'launcher\atlas_signatures.cpp', 'src\character_highlight_core.h') {
         $time = (Get-Item -LiteralPath (Join-Path $root $source)).LastWriteTime
         if ($time -gt $newest) { $newest = $time }
     }
-    foreach ($name in 'boot.bin', 'content.bin', 'image.json') {
+    foreach ($name in 'boot.bin', 'content.bin', 'image.json', 'atlas-signatures.txt') {
+        if ($name -eq 'atlas-signatures.txt' -and -not (Test-Path -LiteralPath (Join-Path $view 'DRACRO.CPK'))) { continue }
         $file = Join-Path $image $name
         if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).LastWriteTime -lt $newest) { return $false }
     }

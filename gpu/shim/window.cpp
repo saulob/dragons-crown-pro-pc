@@ -6,6 +6,8 @@
 #include <cstring>
 #include <vector>
 #include <SDL3/SDL.h>
+#include "character_highlight.h"
+#include "character_highlight_core.h"
 #include "common/assert.h"
 #include "dcp_displays.h"
 #include "dcp_exit_shortcut.h"
@@ -70,7 +72,12 @@ int DirectTouchDevices() {
 }
 
 void LogTouchRoute(DcpTouchRouteEvent event) {
-    const DcpTouchRouteInfo route{SDL_GetCurrentVideoDriver(), DcpPresent::GamescopeSession() ? 1 : 0, DirectTouchDevices()};
+    const DcpTouchRouteInfo route{SDL_GetCurrentVideoDriver(),
+                                  DcpPresent::GamescopeSession() ? 1 : 0,
+                                  DirectTouchDevices(),
+                                  g_gamescope_touch.Roots(),
+                                  g_gamescope_touch.CompositorRoot() ? 1 : 0,
+                                  int(g_gamescope_touch.Failure())};
     char line[DCP_TOUCH_ROUTE_LINE_SIZE];
     if (dcp_touch_route_note(&g_touch_route_log, event, &route, line, sizeof(line))) {
         std::puts(line);
@@ -94,10 +101,10 @@ void ClaimGamescopeTouch() {
     }
     switch (g_gamescope_touch.Acquire()) {
     case DcpGamescopeTouch::Result::Applied:
-        LogTouchRoute(DCP_TOUCH_ROUTE_FALLBACK_USED);
+        LogTouchRoute(DCP_TOUCH_ROUTE_CLAIMED);
         break;
     case DcpGamescopeTouch::Result::Unavailable:
-        LogTouchRoute(DCP_TOUCH_ROUTE_FALLBACK_FAILED);
+        LogTouchRoute(DCP_TOUCH_ROUTE_CLAIM_FAILED);
         break;
     case DcpGamescopeTouch::Result::Unchanged:
         break;
@@ -121,6 +128,21 @@ void PublishTrackpadEnv() {
     int mice = 0;
     SDL_free(SDL_GetMice(&mice));
     dcp_mouse_set_trackpad_env(dcp_mouse_global(), &env, mice);
+}
+
+void NoteInputEvent(uint64_t& counter, const char* event) {
+    if (dcp_trackpad_count_due(++counter)) {
+        std::printf("Input telemetry: event=%s count=%llu\n", event, static_cast<unsigned long long>(counter));
+    }
+}
+
+uint64_t g_sdl_mouse_motion_count = 0;
+uint64_t g_cursor_controller_owner_count = 0;
+
+void NoteControllerCursorOwner(const DcpCursor::State& cursor) {
+    if (cursor.LastDevice() == DcpCursor::Device::Mouse) {
+        NoteInputEvent(g_cursor_controller_owner_count, "cursor_owner_controller");
+    }
 }
 
 } // namespace
@@ -503,6 +525,48 @@ void WindowSDL::UpdateExitChord() {
     }
 }
 
+extern "C" int runtime_pad_player_of_instance(uint32_t instance);
+
+namespace {
+
+SDL_GamepadButton SdlButton(dcp::highlight::PadButton button) {
+    using dcp::highlight::PadButton;
+    switch (button) {
+    case PadButton::Back: return SDL_GAMEPAD_BUTTON_BACK;
+    case PadButton::LeftStick: return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+    case PadButton::RightStick: return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+    case PadButton::LeftShoulder: return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+    case PadButton::RightShoulder: return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    }
+    return SDL_GAMEPAD_BUTTON_INVALID;
+}
+
+} // namespace
+
+// Window thread. The chosen two-button chord on a controller toggles the highlight of the local player that controller drives.
+void WindowSDL::UpdateHighlightChord() {
+    const int chord = DcpSettings::Get().character_highlight_chord;
+    if (chord < 0 || chord >= dcp::highlight::kChordOff || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) == 0) {
+        highlight_chord_down.clear();
+        return;
+    }
+    const auto& buttons = dcp::highlight::kChords[static_cast<size_t>(chord)];
+    for (const auto& entry : pad_activity) {
+        SDL_Gamepad* const gamepad = SDL_GetGamepadFromID(entry.first);
+        if (!gamepad) {
+            highlight_chord_down.erase(entry.first);
+            continue;
+        }
+        const bool down = SDL_GetGamepadButton(gamepad, SdlButton(buttons.first)) &&
+                          SDL_GetGamepadButton(gamepad, SdlButton(buttons.second));
+        bool& was_down = highlight_chord_down[entry.first];
+        if (down && !was_down) {
+            character_highlight_toggle_pad(runtime_pad_player_of_instance(entry.first));
+        }
+        was_down = down;
+    }
+}
+
 // Window thread. A DCP_MOTION_HELD_* mask of the mouse and opened-gamepad buttons held right now.
 unsigned WindowSDL::HeldButtons() const {
     unsigned held = dcp_mouse_any_held(dcp_mouse_global()) ? DCP_MOTION_HELD_MOUSE : 0u;
@@ -588,8 +652,9 @@ bool WindowSDL::PollEvents() {
     RefreshTitle();
     DcpOverlay::SetDisplayScale(SDL_GetWindowDisplayScale(window));
     cursor.SetMouseControls(dcp_mouse_enabled(dcp_mouse_global()) != 0);
-    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0) {
-        g_gamescope_touch.Maintain(SDL_GetTicks());
+    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0 &&
+        g_gamescope_touch.Maintain(SDL_GetTicks())) {
+        LogTouchRoute(DCP_TOUCH_ROUTE_REASSERT);
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -638,6 +703,7 @@ bool WindowSDL::PollEvents() {
             continue;
         }
         if (controller_activity && !ui) {
+            NoteControllerCursorOwner(cursor);
             cursor.ControllerActivity();
         }
         if (DcpTouchRoute::IsFingerEvent(event)) {
@@ -652,6 +718,7 @@ bool WindowSDL::PollEvents() {
         switch (event.type) {
         case SDL_EVENT_MOUSE_MOTION:
             if (!ui && !touch_mouse) {
+                NoteInputEvent(g_sdl_mouse_motion_count, "sdl_mouse_motion_received");
                 cursor.MouseMoved();
                 const float to_game = SDL_GetWindowPixelDensity(window) * dcp_mouse_game_scale(GetWidth(), GetHeight());
                 dcp_mouse_motion(dcp_mouse_global(), event.motion.xrel * to_game, event.motion.yrel * to_game);
@@ -698,13 +765,16 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_KEY_DOWN: {
             const bool window_shortcut = event.key.scancode == DcpSettings::Get().window_mode_key;
             const bool hud_key = event.key.scancode == DcpPing::kFpsKey || event.key.scancode == DcpPing::kPingKey;
-            const bool host_shortcut =
-                window_shortcut || hud_key || event.key.scancode == DcpSettings::Get().menu_key;
+            const bool highlight_shortcut = event.key.scancode == DcpSettings::Get().character_highlight_key;
+            const bool host_shortcut = window_shortcut || hud_key || highlight_shortcut ||
+                                       event.key.scancode == DcpSettings::Get().menu_key;
             const DcpPing::HudKey hud =
                 DcpPing::HudKeyFor(event.key.scancode, event.key.repeat, runtime_online_play_enabled() != 0);
             auto& settings = DcpSettings::Get();
             if (window_shortcut && !event.key.repeat) {
                 ToggleBorderless();
+            } else if (highlight_shortcut && !event.key.repeat) {
+                character_highlight_toggle_local(0);
             } else if (hud == DcpPing::HudKey::Fps) {
                 settings.show_fps = !settings.show_fps;
             } else if (hud == DcpPing::HudKey::Ping) {
@@ -738,12 +808,14 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;
             ReleaseMouse();
+            g_gamescope_touch.Release(); // the window thread ends the process: no destructor runs
             break;
         default:
             break;
         }
     }
     UpdateExitChord();
+    UpdateHighlightChord();
     UpdateMouseCapture();
     UpdateCursor();
     return is_open;

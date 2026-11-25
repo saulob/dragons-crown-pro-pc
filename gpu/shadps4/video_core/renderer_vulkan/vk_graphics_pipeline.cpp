@@ -19,6 +19,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "common/elf_info.h"
+#include "dcp_present.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
@@ -68,6 +69,7 @@ GraphicsPipeline::GraphicsPipeline(
       fetch_shader{std::move(fetch_shader_)} {
     const auto started = Clock::now();
     const vk::Device device = instance.GetDevice();
+    std::ranges::copy(modules, shader_modules.begin());
     const auto state_route = GpuCompat::ChoosePipelineState(instance.GetGpuCapabilities());
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
@@ -229,9 +231,10 @@ GraphicsPipeline::GraphicsPipeline(
             const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
             sdata.tcs = Shader::Backend::SPIRV::EmitAuxilaryTessShader(type, fs_info);
         }
+        mask_tcs_module = CompileSPV(sdata.tcs, instance.GetDevice());
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eTessellationControl,
-            .module = CompileSPV(sdata.tcs, instance.GetDevice()),
+            .module = mask_tcs_module,
             .pName = "main",
         });
     }
@@ -248,9 +251,10 @@ GraphicsPipeline::GraphicsPipeline(
             sdata.tes = Shader::Backend::SPIRV::EmitAuxilaryTessShader(
                 AuxShaderType::PassthroughTES, fs_info);
         }
+        mask_tes_module = CompileSPV(sdata.tes, instance.GetDevice());
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eTessellationEvaluation,
-            .module = CompileSPV(sdata.tes, instance.GetDevice()),
+            .module = mask_tes_module,
             .pName = "main",
         });
     }
@@ -267,9 +271,10 @@ GraphicsPipeline::GraphicsPipeline(
 
             sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs);
         }
+        mask_fragment_module = CompileSPV(sdata.fragment, instance.GetDevice());
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = CompileSPV(sdata.fragment, instance.GetDevice()),
+            .module = mask_fragment_module,
             .pName = "main",
         });
     }
@@ -300,19 +305,33 @@ GraphicsPipeline::GraphicsPipeline(
     }
 
     std::array<vk::SampleCountFlagBits, AmdGpu::NUM_COLOR_BUFFERS> color_samples;
-    std::ranges::transform(key.color_samples, color_samples.begin(), [&instance](u8 num_samples) {
-        return num_samples ? LiverpoolToVK::NumSamples(num_samples, instance.GetColorSampleCounts())
-                           : vk::SampleCountFlagBits::e1;
-    });
+    std::array<u32, AmdGpu::NUM_COLOR_BUFFERS> color_sample_bits{};
+    for (u32 i = 0; i < AmdGpu::NUM_COLOR_BUFFERS; ++i) {
+        const u8 num_samples = key.color_samples[i];
+        color_samples[i] =
+            num_samples ? LiverpoolToVK::NumSamples(num_samples, instance.GetColorSampleCounts())
+                        : vk::SampleCountFlagBits::e1;
+        color_sample_bits[i] = static_cast<u32>(color_samples[i]);
+    }
+    const vk::SampleCountFlagBits depth_samples =
+        LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts());
+    const bool has_depth_stencil =
+        key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid ||
+        key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid;
+    // Only attach VkAttachmentSampleCountInfoAMD when sample counts actually differ; uniform-sample
+    // pipelines inherit rasterizationSamples and avoid unsupported pNext recording in Steam Fossilize.
+    const bool attach_mixed_samples = GpuCompat::NeedsMixedSamplesInfo(
+        state_route, static_cast<u32>(sdata.multisampling.rasterizationSamples),
+        color_sample_bits.data(), key.num_color_attachments, has_depth_stencil,
+        static_cast<u32>(depth_samples));
     const vk::AttachmentSampleCountInfoAMD mixed_samples = {
         .colorAttachmentCount = key.num_color_attachments,
         .pColorAttachmentSamples = color_samples.data(),
-        .depthStencilAttachmentSamples =
-            LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts()),
+        .depthStencilAttachmentSamples = depth_samples,
     };
 
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
-        .pNext = state_route.mixed_samples_info ? &mixed_samples : nullptr,
+        .pNext = attach_mixed_samples ? &mixed_samples : nullptr,
         .colorAttachmentCount = key.num_color_attachments,
         .pColorAttachmentFormats = color_formats.data(),
         .depthAttachmentFormat = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid
@@ -468,6 +487,7 @@ GraphicsPipeline::GraphicsPipeline(
                                                  hash, pass, debug_str,
                                                  vk::to_string(clean_result))};
     };
+    const auto driver_started = Clock::now();
     pipeline = create(pipeline_info, "");
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 
@@ -480,11 +500,24 @@ GraphicsPipeline::GraphicsPipeline(
         square_pipeline = create(square_info, " squaring pass");
         SetObjectName(device, *square_pipeline, "Graphics Pipeline {} squaring pass", debug_str);
     }
-    g_dcp_pipeline_total_ns += NsSince(started);
+    const u64 driver_ns = NsSince(driver_started);
+    mask_vertex_attributes = sdata.vertex_attributes;
+    mask_vertex_bindings = sdata.vertex_bindings;
+    mask_vertex_divisors = sdata.divisors;
+    mask_has_vertex_bindings = !sdata.vertex_bindings.empty();
+    const u64 total_ns = NsSince(started);
+    g_dcp_pipeline_total_ns += total_ns;
     ++g_dcp_pipelines_built;
+    DcpPresent::RecordPipelineStall("pipeline_create", static_cast<std::int64_t>(total_ns / 1000000),
+                                    static_cast<std::int64_t>(driver_ns / 1000000),
+                                    attach_mixed_samples, preloading);
 }
 
-GraphicsPipeline::~GraphicsPipeline() = default;
+GraphicsPipeline::~GraphicsPipeline() {
+    if (mask_pipeline) {
+        instance.GetDevice().destroyPipeline(mask_pipeline);
+    }
+}
 
 template <typename Attribute, typename Binding>
 void GraphicsPipeline::GetVertexInputs(
@@ -537,6 +570,192 @@ template void GraphicsPipeline::GetVertexInputs(
     VertexInputs<vk::VertexInputBindingDescription2EXT>& bindings,
     VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT>& divisors,
     VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1) const;
+
+vk::Pipeline GraphicsPipeline::HighlightMaskPipeline() const {
+    std::scoped_lock lock{mask_pipeline_mutex};
+    if (mask_pipeline || mask_pipeline_failed) {
+        return mask_pipeline;
+    }
+    if (!CreateHighlightMaskPipeline()) {
+        mask_pipeline_failed = true;
+    }
+    return mask_pipeline;
+}
+
+bool GraphicsPipeline::CreateHighlightMaskPipeline() const {
+    const vk::Device device = instance.GetDevice();
+    const auto state_route = GpuCompat::ChoosePipelineState(instance.GetGpuCapabilities());
+    const bool is_rect_list = key.prim_type == AmdGpu::PrimitiveType::RectList;
+    const bool is_quad_list = key.prim_type == AmdGpu::PrimitiveType::QuadList;
+
+    const vk::PipelineVertexInputDivisorStateCreateInfo divisor_state = {
+        .vertexBindingDivisorCount = static_cast<u32>(mask_vertex_divisors.size()),
+        .pVertexBindingDivisors = mask_vertex_divisors.data(),
+    };
+    const vk::PipelineVertexInputStateCreateInfo vertex_input_info = {
+        .pNext = mask_vertex_divisors.empty() ? nullptr : &divisor_state,
+        .vertexBindingDescriptionCount = static_cast<u32>(mask_vertex_bindings.size()),
+        .pVertexBindingDescriptions = mask_vertex_bindings.data(),
+        .vertexAttributeDescriptionCount = static_cast<u32>(mask_vertex_attributes.size()),
+        .pVertexAttributeDescriptions = mask_vertex_attributes.data(),
+    };
+    const vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
+        .topology = LiverpoolToVK::PrimitiveType(key.prim_type),
+    };
+    const vk::PipelineTessellationStateCreateInfo tessellation_state = {
+        .patchControlPoints = is_rect_list ? 3U : (is_quad_list ? 4U : key.patch_control_points),
+    };
+
+    vk::StructureChain raster_chain = {
+        vk::PipelineRasterizationStateCreateInfo{
+            .depthClampEnable = key.depth_clamp_enable &&
+                                (!key.depth_clip_enable || instance.IsDepthClipEnableSupported()),
+            .rasterizerDiscardEnable = false,
+            .polygonMode = LiverpoolToVK::PolygonMode(key.polygon_mode),
+            .lineWidth = 1.0f,
+        },
+        vk::PipelineRasterizationProvokingVertexStateCreateInfoEXT{
+            .provokingVertexMode = key.provoking_vtx_last == AmdGpu::ProvokingVtxLast::First
+                                       ? vk::ProvokingVertexModeEXT::eFirstVertex
+                                       : vk::ProvokingVertexModeEXT::eLastVertex,
+        },
+        vk::PipelineRasterizationDepthClipStateCreateInfoEXT{
+            .depthClipEnable = key.depth_clip_enable,
+        },
+    };
+    if (!state_route.provoking_vertex_state) {
+        raster_chain.unlink<vk::PipelineRasterizationProvokingVertexStateCreateInfoEXT>();
+    }
+    if (!instance.IsDepthClipEnableSupported()) {
+        raster_chain.unlink<vk::PipelineRasterizationDepthClipStateCreateInfoEXT>();
+    }
+
+    const vk::PipelineViewportDepthClipControlCreateInfoEXT clip_control = {
+        .negativeOneToOne = key.clip_space == AmdGpu::ClipSpace::MinusWToW,
+    };
+    const vk::PipelineViewportStateCreateInfo viewport_info = {
+        .pNext = instance.IsDepthClipControlSupported() ? &clip_control : nullptr,
+    };
+
+    boost::container::static_vector<vk::DynamicState, 32> dynamic_states = {
+        vk::DynamicState::eViewportWithCount,  vk::DynamicState::eScissorWithCount,
+        vk::DynamicState::eBlendConstants,     vk::DynamicState::eDepthTestEnable,
+        vk::DynamicState::eDepthWriteEnable,   vk::DynamicState::eDepthCompareOp,
+        vk::DynamicState::eDepthBiasEnable,    vk::DynamicState::eDepthBias,
+        vk::DynamicState::eStencilTestEnable,  vk::DynamicState::eStencilReference,
+        vk::DynamicState::eStencilCompareMask, vk::DynamicState::eStencilWriteMask,
+        vk::DynamicState::eStencilOp,          vk::DynamicState::eCullMode,
+        vk::DynamicState::eFrontFace,          vk::DynamicState::eRasterizerDiscardEnable,
+        vk::DynamicState::eLineWidth,          vk::DynamicState::ePrimitiveRestartEnable,
+    };
+    if (state_route.dynamic_depth_bounds) {
+        dynamic_states.push_back(vk::DynamicState::eDepthBoundsTestEnable);
+        dynamic_states.push_back(vk::DynamicState::eDepthBounds);
+    }
+    if (state_route.dynamic_color_write_mask) {
+        dynamic_states.push_back(vk::DynamicState::eColorWriteMaskEXT);
+    }
+    if (state_route.dynamic_vertex_input) {
+        dynamic_states.push_back(vk::DynamicState::eVertexInputEXT);
+    } else if (mask_has_vertex_bindings) {
+        dynamic_states.push_back(vk::DynamicState::eVertexInputBindingStride);
+    }
+    const vk::PipelineDynamicStateCreateInfo dynamic_info = {
+        .dynamicStateCount = static_cast<u32>(dynamic_states.size()),
+        .pDynamicStates = dynamic_states.data(),
+    };
+
+    boost::container::static_vector<vk::PipelineShaderStageCreateInfo, MaxShaderStages>
+        shader_stages;
+    const auto add_stage = [&](vk::ShaderStageFlagBits stage, vk::ShaderModule module) {
+        if (module) {
+            shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
+                .stage = stage,
+                .module = module,
+                .pName = "main",
+            });
+        }
+    };
+    add_stage(vk::ShaderStageFlagBits::eVertex, shader_modules[u32(Shader::SwStage::Vertex)]);
+    add_stage(vk::ShaderStageFlagBits::eGeometry, shader_modules[u32(Shader::SwStage::Geometry)]);
+    add_stage(vk::ShaderStageFlagBits::eTessellationControl,
+              shader_modules[u32(Shader::SwStage::TessellationControl)]
+                  ? shader_modules[u32(Shader::SwStage::TessellationControl)]
+                  : mask_tcs_module);
+    add_stage(vk::ShaderStageFlagBits::eTessellationEvaluation,
+              shader_modules[u32(Shader::SwStage::TessellationEval)]
+                  ? shader_modules[u32(Shader::SwStage::TessellationEval)]
+                  : mask_tes_module);
+    add_stage(vk::ShaderStageFlagBits::eFragment,
+              shader_modules[u32(Shader::SwStage::Fragment)]
+                  ? shader_modules[u32(Shader::SwStage::Fragment)]
+                  : mask_fragment_module);
+    if (shader_stages.empty()) {
+        return false;
+    }
+
+    const vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci = {
+        .requiredSubgroupSize = 64,
+    };
+    for (auto& stage : shader_stages) {
+        stage.pNext = instance.IsSubgroupSize64Supported() ? &subgroup_size_ci : nullptr;
+    }
+
+    constexpr vk::Format mask_color_format = vk::Format::eR8G8B8A8Unorm;
+    const auto depth_format =
+        HighlightMaskUsesDepth()
+            ? instance.GetSupportedFormat(LiverpoolToVK::DepthFormat(key.z_format, key.stencil_format),
+                                          vk::FormatFeatureFlagBits2::eDepthStencilAttachment)
+            : vk::Format::eUndefined;
+    const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &mask_color_format,
+        .depthAttachmentFormat = depth_format,
+    };
+
+    const vk::PipelineColorBlendAttachmentState attachment{
+        .blendEnable = true,
+        .srcColorBlendFactor = vk::BlendFactor::eOne,
+        .dstColorBlendFactor = vk::BlendFactor::eOne,
+        .colorBlendOp = vk::BlendOp::eMax,
+        .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+        .dstAlphaBlendFactor = vk::BlendFactor::eOne,
+        .alphaBlendOp = vk::BlendOp::eMax,
+        .colorWriteMask = vk::ColorComponentFlagBits::eA,
+    };
+    const vk::PipelineColorBlendStateCreateInfo color_blending = {
+        .attachmentCount = 1,
+        .pAttachments = &attachment,
+    };
+    constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
+    const vk::PipelineMultisampleStateCreateInfo multisampling = {
+        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+    };
+    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+        .pNext = &pipeline_rendering_ci,
+        .stageCount = static_cast<u32>(shader_stages.size()),
+        .pStages = shader_stages.data(),
+        .pVertexInputState = !state_route.dynamic_vertex_input ? &vertex_input_info : nullptr,
+        .pInputAssemblyState = &input_assembly,
+        .pTessellationState = &tessellation_state,
+        .pViewportState = &viewport_info,
+        .pRasterizationState = &raster_chain.get(),
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = state_route.static_depth_stencil_state ? &depth_stencil_info : nullptr,
+        .pColorBlendState = &color_blending,
+        .pDynamicState = &dynamic_info,
+        .layout = GetLayout(),
+    };
+    auto [result, pipeline] = device.createGraphicsPipelineUnique(nullptr, pipeline_info);
+    if (result != vk::Result::eSuccess) {
+        LOG_WARNING(Render_Vulkan, "Character Highlight mask pipeline creation failed: {}",
+                    vk::to_string(result));
+        return false;
+    }
+    mask_pipeline = pipeline.release();
+    SetObjectName(device, mask_pipeline, "Character Highlight mask {}", GetDebugString());
+    return true;
+}
 
 void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;

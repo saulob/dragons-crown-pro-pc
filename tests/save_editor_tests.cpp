@@ -40,6 +40,7 @@
 #include "appearance_hooks.h"
 #include "appearance_loader.h"
 #include "appearance_runtime.h"
+#include "build_scan.h"
 #include "character_art.h"
 #include "cpk_fixture.h"
 #include "cpk_patch.h"
@@ -84,6 +85,12 @@ void ProgressStep(const char* label) {
 void PutU16(std::vector<uint8_t>& bytes, size_t offset, uint16_t value) {
     bytes[offset] = static_cast<uint8_t>(value);
     bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+uint32_t ReadU32At(const std::vector<uint8_t>& bytes, size_t offset) {
+    uint32_t value = 0;
+    for (size_t i = 0; i < 4; ++i) value |= uint32_t(bytes[offset + i]) << (8 * i);
+    return value;
 }
 
 void PutU32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value) {
@@ -284,7 +291,7 @@ void TestBackupRestore(const fs::path& base) {
     SaveModel model = SaveModel::FromFile(save0);
     model.SetGold(0, 55555);
     WriteSaveAtomically(save0, model.Serialize(), ValidateSave);
-    const auto restore_error = RestoreBackup(*backup, save0, backup_folder);
+    const auto restore_error = RestoreBackup(*backup, save0, backup_folder, "CUSA10454", "SAVEDATA00");
     CHECK(!restore_error.has_value());
     const SaveModel restored = SaveModel::FromFile(save0);
     CHECK(restored.valid());
@@ -774,6 +781,199 @@ std::string ReadSource(const char* relative) {
 }
 #endif
 
+std::vector<uint8_t> SaveWithDifficulties(int slot, std::initializer_list<int> values) {
+    std::vector<uint8_t> bytes = MakeSyntheticSave();
+    int character = 0;
+    for (const int value : values) {
+        if (character >= 2) SetCharacter(bytes, slot, character, "Cleo", 100, 5, 0);
+        bytes[RecordOffset(slot, character) + kCharColor] = 0;
+        bytes[RecordOffset(slot, character) + kCharDifficulty] = uint8_t(value);
+        ++character;
+    }
+    PutU32(bytes, kSaveCrcOffset, SaveCrc32(bytes));
+    return bytes;
+}
+
+void TestDifficultyModel() {
+    const SaveModel model = SaveModel::FromBytes(SaveWithDifficulties(0, {4, 2, 0}));
+    CHECK(model.Character(0, 0)->difficulty == 4 && model.Character(0, 1)->difficulty == 2 && model.Character(0, 2)->difficulty == 0);
+    CHECK(kCharDifficulty == kCharacterStride + 0xA9);
+    CHECK(model.Character(0, 0)->record_offset + kCharDifficulty == model.Character(0, 1)->record_offset + 0xA9);
+
+    CHECK(DifficultyName(0) == "Normal" && DifficultyName(1) == "Hard" && DifficultyName(2) == "Hard");
+    CHECK(DifficultyName(3) == "Infernal" && DifficultyName(4) == "Infernal" && DifficultyName(kDifficultyUltimate) == "Ultimate");
+    CHECK(DifficultyName(5).empty() && DifficultyName(0xCC).empty());
+    for (int raw = 0; raw < 256; ++raw) {
+        const DcpDifficulty category = dcp_difficulty_of(raw);
+        CHECK(DifficultyName(uint8_t(raw)) == (category == DCP_DIFFICULTY_UNKNOWN ? std::string_view() : std::string_view(dcp_difficulty_name(category))));
+    }
+    CHECK(IsEditableDifficulty(0) && IsEditableDifficulty(2) && IsEditableDifficulty(4) && IsEditableDifficulty(99));
+    for (const int refused : {1, 3, 5, 98, 100, 0xCC, -1, 256}) CHECK(!IsEditableDifficulty(refused));
+
+    SaveModel edited = model;
+    for (const int refused : {1, 3, 5, 98, 100, -1}) CHECK(!edited.SetDifficulty(0, 0, refused));
+    CHECK(!edited.SetDifficulty(0, 5, 2) && !edited.SetDifficulty(3, 0, 2) && !edited.SetDifficulty(0, 16, 2));
+    CHECK(std::ranges::equal(edited.bytes(), model.bytes()));
+
+    CHECK(edited.SetDifficulty(0, 1, 4));
+    CHECK(edited.Character(0, 1)->difficulty == 4);
+    CHECK(edited.Character(0, 0)->difficulty == 4 && edited.Character(0, 2)->difficulty == 0);
+    size_t differing = 0;
+    for (size_t i = 0; i < edited.bytes().size(); ++i) differing += edited.bytes()[i] != model.bytes()[i];
+    CHECK(differing == 1 && edited.bytes()[RecordOffset(0, 1) + kCharDifficulty] == 4);
+
+    const SaveModel unknown = SaveModel::FromBytes(SaveWithDifficulties(0, {0xCC, 99, 7}));
+    CHECK(unknown.Character(0, 0)->difficulty == 0xCC && DifficultyName(unknown.Character(0, 0)->difficulty).empty());
+    CHECK(unknown.Character(0, 1)->difficulty == 99 && DifficultyName(unknown.Character(0, 1)->difficulty) == "Ultimate");
+    CHECK(unknown.Character(0, 2)->difficulty == 7);
+
+    const std::vector<uint8_t> save = SaveWithDifficulties(0, {4, 2});
+    CHECK(SaveModel::FromBytes(save).Serialize() == save);
+    const std::vector<uint8_t> truncated(save.begin(), save.begin() + 4096);
+    SaveModel broken = SaveModel::FromBytes(truncated);
+    CHECK(!broken.valid() && !broken.SetDifficulty(0, 0, 2));
+}
+
+void TestDifficultyUltimate(const fs::path& base) {
+    CHECK(kEditableDifficulties.size() == 4 && kEditableDifficulties[3] == 0x63 && kDifficultyUltimate == 0x63);
+    for (const auto& [value, expected] : {std::pair{0, uint8_t(0)}, {2, uint8_t(2)}, {4, uint8_t(4)}, {99, uint8_t(0x63)}}) {
+        SaveModel model = SaveModel::FromBytes(SaveWithDifficulties(0, {1, 3, 0xCC}));
+        CHECK(model.SetDifficulty(0, 0, value));
+        CHECK(model.Serialize()[RecordOffset(0, 0) + kCharDifficulty] == expected);
+    }
+
+    const std::vector<uint8_t> original = SaveWithDifficulties(0, {0, 2, 4, 1});
+    for (const int from : {0, 2, 4}) {
+        std::vector<uint8_t> bytes = original;
+        bytes[RecordOffset(0, 0) + kCharDifficulty] = uint8_t(from);
+        PutU32(bytes, kSaveCrcOffset, SaveCrc32(bytes));
+        SaveModel model = SaveModel::FromBytes(bytes);
+        CHECK(model.SetDifficulty(0, 0, 99) && model.Character(0, 0)->difficulty == 99);
+        const SaveModel reread = SaveModel::FromBytes(model.Serialize());
+        CHECK(reread.valid() && reread.crc_valid() && reread.Character(0, 0)->difficulty == 99);
+        CHECK(reread.Character(0, 1)->difficulty == 2 && reread.Character(0, 2)->difficulty == 4 && reread.Character(0, 3)->difficulty == 1);
+    }
+
+    const fs::path user = base / "difficulty_ultimate_user";
+    const fs::path file = WriteEditableSave(user, original);
+    std::vector<uint8_t> on_disk;
+    SaveEdit edit = OpenEdit(user);
+    CHECK(edit.working().SetDifficulty(0, 0, 99) && edit.dirty());
+    edit.Discard();
+    CHECK(!edit.dirty() && ReadBytes(file, on_disk) && on_disk == original && ListBackups(BackupFolder(user)).empty());
+
+    CHECK(edit.working().SetDifficulty(0, 0, 99));
+    CHECK(edit.Apply() == SaveEdit::Result::kApplied);
+    CHECK(ReadBytes(file, on_disk));
+    size_t differing = 0;
+    for (size_t i = 4; i < on_disk.size(); ++i) differing += on_disk[i] != original[i];
+    CHECK(differing == 1 && on_disk[RecordOffset(0, 0) + kCharDifficulty] == 0x63);
+    const SaveModel reloaded = SaveModel::FromBytes(on_disk);
+    CHECK(reloaded.valid() && reloaded.crc_valid() && reloaded.Character(0, 0)->difficulty == 99);
+    CHECK(reloaded.Character(0, 3)->difficulty == 1 && reloaded.Character(1, 0) && !reloaded.Character(1, 0)->present);
+    CHECK(ListBackups(BackupFolder(user)).size() == 1);
+
+    CHECK(edit.working().SetDifficulty(0, 0, 0) && edit.Apply() == SaveEdit::Result::kApplied);
+    CHECK(SaveModel::FromFile(file).Character(0, 0)->difficulty == 0);
+    CHECK(!ListBackups(BackupFolder(user)).empty());
+}
+
+void TestDifficultySlots() {
+    std::vector<uint8_t> bytes = SaveWithDifficulties(0, {4, 2});
+    SetCharacter(bytes, 1, 0, "Slotb", 100, 5, 0);
+    bytes[RecordOffset(1, 0) + kCharDifficulty] = 0;
+    PutU32(bytes, kSaveCrcOffset, SaveCrc32(bytes));
+    SaveModel model = SaveModel::FromBytes(bytes);
+    CHECK(model.Character(0, 0)->difficulty == 4 && model.Character(1, 0)->difficulty == 0);
+    CHECK(model.SetDifficulty(1, 0, 2));
+    CHECK(model.Character(1, 0)->difficulty == 2 && model.Character(0, 0)->difficulty == 4 && model.Character(0, 1)->difficulty == 2);
+}
+
+void TestDifficultyEdit(const fs::path& base) {
+    const fs::path user = base / "difficulty_user";
+    const std::vector<uint8_t> original = SaveWithDifficulties(0, {4, 2, 0xCC});
+    const fs::path file = WriteEditableSave(user, original);
+    std::vector<uint8_t> on_disk;
+
+    SaveEdit edit = OpenEdit(user);
+    CHECK(!edit.dirty() && edit.Apply() == SaveEdit::Result::kNothingToApply);
+    CHECK(edit.working().SetDifficulty(0, 0, 0));
+    CHECK(edit.dirty() && edit.persisted().Character(0, 0)->difficulty == 4 && edit.working().Character(0, 1)->difficulty == 2);
+    edit.Discard();
+    CHECK(!edit.dirty() && edit.working().Character(0, 0)->difficulty == 4);
+    CHECK(ReadBytes(file, on_disk) && on_disk == original && ListBackups(BackupFolder(user)).empty());
+
+    CHECK(edit.working().SetDifficulty(0, 0, 2) && edit.working().SetDifficulty(0, 0, 4));
+    CHECK(!edit.dirty());
+
+    CHECK(edit.working().SetDifficulty(0, 1, 4));
+    CHECK(edit.Apply() == SaveEdit::Result::kApplied && !edit.dirty());
+    CHECK(ReadBytes(file, on_disk) && on_disk.size() == original.size());
+    size_t differing = 0;
+    for (size_t i = 4; i < on_disk.size(); ++i) differing += on_disk[i] != original[i];
+    CHECK(differing == 1 && on_disk[RecordOffset(0, 1) + kCharDifficulty] == 4);
+    const SaveModel reloaded = SaveModel::FromBytes(on_disk);
+    CHECK(reloaded.valid() && reloaded.crc_valid());
+    CHECK(reloaded.Character(0, 0)->difficulty == 4 && reloaded.Character(0, 1)->difficulty == 4);
+    CHECK(reloaded.Character(0, 2)->difficulty == 0xCC);
+    CHECK(ListBackups(BackupFolder(user)).size() == 1 && !fs::exists(fs::path(file.string() + ".tmp")));
+
+    CHECK(edit.working().SetDifficulty(0, 0, 0));
+    std::vector<uint8_t> changed_elsewhere = on_disk;
+    changed_elsewhere[RecordOffset(0, 0) + kCharLevel] ^= 1;
+    PutU32(changed_elsewhere, kSaveCrcOffset, SaveCrc32(changed_elsewhere));
+    WriteBytes(file, changed_elsewhere);
+    CHECK(edit.Apply() == SaveEdit::Result::kStale);
+    CHECK(ReadBytes(file, on_disk) && on_disk == changed_elsewhere && ListBackups(BackupFolder(user)).size() == 1);
+
+    const fs::path unknown_user = base / "difficulty_unknown_user";
+    const fs::path unknown_file = WriteEditableSave(unknown_user, SaveWithDifficulties(0, {0xCC, 99}));
+    SaveEdit other = OpenEdit(unknown_user);
+    CHECK(other.working().SetLevel(0, 0, 30));
+    CHECK(other.Apply() == SaveEdit::Result::kApplied);
+    const SaveModel kept = SaveModel::FromFile(unknown_file);
+    CHECK(kept.Character(0, 0)->difficulty == 0xCC && kept.Character(0, 1)->difficulty == 99);
+}
+
+void TestDifficultyRealSave(const fs::path& source_dir) {
+    const fs::path real = source_dir / "user" / "savedata" / "1" / "CUSA10454" / "SAVEDATA00" / "SAVE0.DAT";
+    std::ifstream in(real, std::ios::binary);
+    if (!in) return;
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const SaveModel model = SaveModel::FromBytes(bytes);
+    if (!model.valid() || model.Character(0, 0)->name != "George") return;
+    CHECK(model.Character(0, 0)->klass == CharacterClass::kDwarf);
+    for (const CharacterView& character : model.slots()[0].characters) {
+        if (character.present) CHECK(!DifficultyName(character.difficulty).empty());
+    }
+}
+
+void TestDifficultyPage() {
+#ifdef DCP_SOURCE_DIR
+    const std::string page = ReadSource("launcher/editor_page.cpp");
+    const size_t editor = page.find("void EditorPage::DrawCharacterEditor(");
+    const size_t difficulty = page.find("void EditorPage::DrawDifficulty(");
+    const size_t next = page.find("void EditorPage::DrawCharacter(");
+    CHECK(editor != std::string::npos && difficulty != std::string::npos && editor < difficulty && difficulty < next);
+    const std::string editor_body = page.substr(editor, difficulty - editor);
+    const size_t name_row = editor_body.find("ui.Row(Tr(\"Name\")");
+    const size_t difficulty_row = editor_body.find("DrawDifficulty(");
+    const size_t level_row = editor_body.find("ui.Row(Tr(\"Level\")");
+    CHECK(name_row != std::string::npos && name_row < difficulty_row && difficulty_row < level_row);
+    CHECK(editor_body.find("DrawDifficulty(", difficulty_row + 1) == std::string::npos);
+    const size_t data_select = page.find("##select_slot");
+    CHECK(data_select != std::string::npos && (data_select < editor || data_select > next));
+    const std::string body = page.substr(difficulty, next - difficulty);
+    CHECK(body.find("BeginCombo(\"##difficulty\"") != std::string::npos && body.find("SetDifficulty(") != std::string::npos);
+    CHECK(body.find("Apply") == std::string::npos);
+    const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
+    for (const char* key : {"\nDifficulty\tDificuldade\n", "Difficulty belongs to this character and can be changed here\tA dificuldade pertence a este personagem e pode ser alterada aqui\n",
+                            "\nNormal\tNormal\n", "\nHard\tDif\xC3\xAD" "cil\n", "\nInfernal\tInfernal\n", "\nUltimate\tSupremo\n"}) {
+        CHECK(portuguese.find(key) != std::string::npos);
+    }
+#endif
+}
+
 const GameBuild* FindBuild(std::string_view label) {
     for (const GameBuild& build : SupportedBuilds()) {
         if (label == build.label) return &build;
@@ -957,7 +1157,7 @@ void TestEditorSections() {
     CHECK(choice != std::string::npos && choice < line && line < list);
     CHECK(flow.find("SelectedBuild()->build->label") != std::string::npos && flow.find("FriendlyBuildText") == std::string::npos);
     for (const char* gone : {"DrawBuild", "DrawSave(", "DrawDataSlot", "DrawTransfer", "Tr(\"Game Build\")", "select_build",
-                             "SelectBuild", "Tr(\"Gold\")", "kGoldRange", "Tr(\"Save path\")", "Tr(\"Savedata folder\")",
+                             "SelectBuild", "Tr(\"Save path\")", "Tr(\"Savedata folder\")",
                              "Tr(\"Modified\")", "InfoGrid", "SaveChoiceLabel", "BuildChoiceLabel", "Save 1", "select_save", "SelectSave", "save_loader",
                              "Loading characters", "Headgear", "HeadgearRow"}) {
         CHECK(page.find(gone) == std::string::npos);
@@ -1023,11 +1223,22 @@ void TestSaveDataText() {
     CHECK(Count(page, "Tr(\"Game Build\")") == 0);
     CHECK(page.find("Tr(\"Compatible with PS4, PS3 and PS Vita saves.\")") == std::string::npos);
     const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
-    for (const std::string& text : {page, portuguese, ReadSource("README.md"), ReadSource("launcher/save_import.cpp"),
-                                    ReadSource("launcher/save_import.h")}) {
+    for (const std::string& text : {page, portuguese, ReadSource("launcher/save_import.cpp"), ReadSource("launcher/save_import.h")}) {
         std::string lower = text;
         for (char& c : lower) c = char(std::tolower(static_cast<unsigned char>(c)));
         CHECK(lower.find("apollo") == std::string::npos);
+    }
+    {
+        std::string readme = ReadSource("README.md");
+        for (char& c : readme) c = char(std::tolower(static_cast<unsigned char>(c)));
+        size_t mentions = 0, credited = 0;
+        for (size_t at = readme.find("apollo"); at != std::string::npos; at = readme.find("apollo", at + 1)) ++mentions;
+        for (size_t at = readme.find("- ps3 save reading"); at != std::string::npos; at = readme.find("- ps3 save reading", at + 1)) {
+            const size_t end = readme.find('\n', at);
+            const std::string line = readme.substr(at, end - at);
+            credited += line.find("apollo") != std::string::npos && line.find("none of their code") != std::string::npos;
+        }
+        CHECK(credited == 1 && mentions <= 2);
     }
     CHECK(portuguese.find("Compatible with PS4, PS3 and PS Vita saves.\t") != std::string::npos);
 #endif
@@ -1126,10 +1337,100 @@ void TestApplyAll(const fs::path& base) {
     CHECK(edit.working().SetColor(0, 0, 4));
     fs::remove(file);
     outcome = ApplyAll(&edit, working, saved);
-    CHECK(!outcome.ok() && outcome.save == SaveEdit::Result::kBackupFailed && outcome.rolled_back && !outcome.custom_written);
+    CHECK(!outcome.ok() && outcome.save == SaveEdit::Result::kStale && outcome.rolled_back && !outcome.custom_written);
     CHECK(saved == committed);
     CustomStore restored(CustomStorePath(user));
     CHECK(restored.Load() && restored == committed);
+}
+
+bool GoldNativeReaderIn(const fs::path& eboot) {
+    std::vector<uint8_t> file;
+    if (!ReadBytes(eboot, file)) return false;
+    const scan::ExecutableInfo info = scan::ParseExecutable(file);
+    if (!info.valid || !info.mappable) return false;
+    scan::MappedImage image;
+    std::string error;
+    if (!scan::MapExecutable(file, info, 0, image, error)) return false;
+    size_t total = 0;
+    const auto reader = scan::FindPattern(image, "8B 80 38 F2 0A 00 5D C3", 4, total);
+    const auto add = scan::FindPattern(image, "41 03 86 38 F2 0A 00", 4, total);
+    const auto store = scan::FindPattern(image, "41 89 86 38 F2 0A 00", 4, total);
+    const auto cap = scan::FindPattern(image, "3D FF E0 F5 05", 4, total);
+    const auto cap_mov = scan::FindPattern(image, "B9 FF E0 F5 05", 4, total);
+    return !reader.empty() && !add.empty() && !store.empty() && !cap.empty() && !cap_mov.empty();
+}
+
+bool TestGoldNativeReader() {
+#ifdef DCP_SOURCE_DIR
+    const fs::path source = DCP_SOURCE_DIR;
+    int checked = 0;
+    for (const fs::path& eboot : {source / "game" / "extracted" / "base" / "eboot.bin",
+                                  source / "game" / "prepared" / "CUSA10209-1.00" / "eboot.bin"}) {
+        if (!fs::exists(eboot)) continue;
+        if (!GoldNativeReaderIn(eboot)) return false;
+        ++checked;
+    }
+    return checked > 0;
+#else
+    return true;
+#endif
+}
+
+void TestGoldEditing(const fs::path& base) {
+    const fs::path user = base / "gold_user";
+    const SaveModel model = ModelWithColors({{1, 0}, {4, 2}});
+    const std::vector<uint8_t> original(model.bytes().begin(), model.bytes().end());
+    const fs::path file = WriteEditableSave(user, original);
+
+    SaveEdit edit = OpenEdit(user);
+    CHECK(edit.persisted().Slot(0)->gold == 100);
+    CHECK(edit.persisted().Slot(1)->gold == 7757);
+    const CharacterView before = *edit.persisted().Character(0, 0);
+
+    CHECK(edit.working().SetGold(0, 2356557));
+    CHECK(edit.Apply() == SaveEdit::Result::kApplied);
+    std::vector<uint8_t> on_disk;
+    CHECK(ReadBytes(file, on_disk));
+    CHECK(ReadU32At(on_disk, kDataSlotGoldOffset) == 2356557);
+    const SaveModel reopened = SaveModel::FromFile(file);
+    CHECK(reopened.valid() && reopened.crc_valid());
+    CHECK(reopened.Slot(0)->gold == 2356557);
+    CHECK(reopened.Slot(1)->gold == 7757);
+    CHECK(reopened.Character(0, 0)->name == before.name);
+    CHECK(reopened.Character(0, 0)->difficulty == before.difficulty);
+    CHECK(reopened.Character(0, 0)->level_stored == before.level_stored);
+    CHECK(reopened.Character(0, 0)->skill_points == before.skill_points);
+    CHECK(reopened.Character(0, 0)->hp_current == before.hp_current);
+    CHECK(reopened.Character(0, 0)->hp_max == before.hp_max);
+    CHECK(reopened.Character(0, 0)->stats == before.stats);
+
+    // The value belongs to the DATA slot, not the selected character: character B reads the same field.
+    CHECK(reopened.Character(0, 1) && reopened.Slot(0)->gold == 2356557);
+
+    SaveEdit discarded = OpenEdit(user);
+    CHECK(discarded.working().SetGold(0, 999));
+    discarded.Discard();
+    CHECK(discarded.working().Slot(0)->gold == 2356557);
+    CHECK(SaveModel::FromFile(file).Slot(0)->gold == 2356557);
+
+    SaveEdit minimum = OpenEdit(user);
+    CHECK(minimum.working().SetGold(0, 0));
+    CHECK(minimum.Apply() == SaveEdit::Result::kApplied);
+    CHECK(SaveModel::FromFile(file).Slot(0)->gold == 0);
+
+    SaveEdit maximum = OpenEdit(user);
+    CHECK(maximum.working().SetGold(0, kMaxGold));
+    CHECK(maximum.Apply() == SaveEdit::Result::kApplied);
+    std::vector<uint8_t> max_bytes;
+    CHECK(ReadBytes(file, max_bytes));
+    CHECK(ReadU32At(max_bytes, kDataSlotGoldOffset) == uint32_t(kMaxGold));
+    CHECK(SaveModel::FromFile(file).Slot(0)->gold == uint32_t(kMaxGold));
+
+    SaveEdit clamped = OpenEdit(user);
+    CHECK(!clamped.working().SetGold(0, uint32_t(kMaxGold) + 1));
+    CHECK(ClampNumber(123456789, kGoldRange) == kMaxGold);
+    CHECK(ParseNumber("999999999999", kGoldRange) == kMaxGold);
+    CHECK(TestGoldNativeReader());
 }
 
 void TestRecolor() {
@@ -2304,11 +2605,11 @@ void TestEditorNavigationModel() {
     CHECK(flow.find("DrawCharacterList(ui)") != std::string::npos && flow.find("DrawAppearanceLoading(ui)") != std::string::npos);
     const size_t editor_start = page.find("void EditorPage::DrawCharacterEditor(");
     const std::string editor = page.substr(editor_start, page.find("\n}\n", editor_start) - editor_start);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") != std::string::npos);
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(editor.find("Tr(\"Appearance\")") == std::string::npos && editor.find("RequestAppearance()") != std::string::npos);
     const size_t appearance_start = page.find("void EditorPage::DrawAppearance(");
     const std::string view = page.substr(appearance_start, page.find("\n}\n", appearance_start) - appearance_start);
-    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"))") != std::string::npos);
+    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(view.find("nav_.BackToCharacter();") != std::string::npos && view.find("SetLook(") == std::string::npos);
     CHECK(view.find("nav_.BackToCharacter()") != std::string::npos && view.find("nav_.Back()") == std::string::npos);
     // Navigating writes nothing and discards nothing.
@@ -2503,7 +2804,7 @@ void TestEditorNumbers() {
     const size_t start = page.find("bool EditorPage::NumberControl(");
     const std::string control = page.substr(start, page.find("\n}\n", start) - start);
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
-    CHECK(control.find("ParseNumber(") != std::string::npos);
+    CHECK(control.find("CommitTypedNumber(") != std::string::npos);
     for (const char* field : {"NumberControl(ui, \"level\", &level, kLevelRange",
                               "NumberControl(ui, \"skill_points\"", "NumberControl(ui, \"hp_current\"", "NumberControl(ui, \"hp_max\""}) {
         CHECK(page.find(field) != std::string::npos);
@@ -2558,7 +2859,7 @@ void TestEditorCharacterNavigation(const fs::path& base) {
     CHECK(list_body.find("SelectedSlot()->characters") != std::string::npos && editor_body.find("SelectedSlot()->characters") == std::string::npos);
     CHECK(editor_body.find("Tr(\"Back to Characters\")") != std::string::npos && editor_body.find("nav_.Back()") != std::string::npos);
     CHECK(editor_body.find("Tr(\"Back to Characters\")") < editor_body.find("DrawArt("));
-    CHECK(editor_body.find("Tr(\"Gold\")") == std::string::npos && editor_body.find("gold") == std::string::npos);
+    CHECK(editor_body.find("Tr(\"Gold\")") != std::string::npos && editor_body.find("SetGold(selected_slot_") != std::string::npos);
     CHECK(editor_body.find("ApplyChanges") == std::string::npos && editor_body.find("edit_->Apply") == std::string::npos);
     CHECK(editor_body.find("InputText(\"##name\"") != std::string::npos && editor_body.find("NumberControl(ui, \"name\"") == std::string::npos);
     CHECK(header.find("CharacterNav nav_;") != std::string::npos);
@@ -2666,9 +2967,31 @@ void TestEditorResponsiveLayout() {
 void TestEditorNumberControlLook() {
     CHECK(kNumberGlyphRatio >= 0.45f && kNumberGlyphThickness >= 2.0f);
     CHECK(NumberHasThumb(kLevelRange) && NumberHasThumb(kSkillPointRange) && NumberHasThumb(kHpRange) && NumberHasThumb({0, 300}));
-    CHECK(!NumberHasThumb(kGoldRange)); // gold is dragged by small relative steps, never by position
     CHECK(kNumberThumbMinWidth >= 12.0f); // Level 1 still shows a real handle
     CHECK(StepNumber(1000, 1, kGoldRange) == 1001 && StepNumber(1000, -1, kGoldRange) == 999); // a huge range keeps single steps
+
+    const auto gold_span = [](float min, float max, int value, float grab) {
+        return SliderGrabSpan(min, max, kGoldRange, value, grab);
+    };
+    const Span gold_zero = gold_span(0.0f, 1000.0f, 0, kNumberThumbMinWidth);
+    const Span gold_one = gold_span(0.0f, 1000.0f, 1, kNumberThumbMinWidth);
+    const Span gold_low = gold_span(0.0f, 1000.0f, 443837, kNumberThumbMinWidth);
+    const Span gold_middle = gold_span(0.0f, 1000.0f, 50000000, kNumberThumbMinWidth);
+    const Span gold_max = gold_span(0.0f, 1000.0f, kMaxGold, kNumberThumbMinWidth);
+    CHECK(gold_zero.min >= 0.0f && gold_max.max <= 1000.0f);
+    CHECK(gold_one.min >= gold_zero.min && gold_one.min - gold_zero.min < 0.01f); // visible at the minimum edge
+    CHECK(gold_low.min > gold_zero.min + 1.0f); // 443837 is not collapsed by integer division
+    CHECK(std::abs((gold_middle.min + gold_middle.max) * 0.5f - 500.0f) < 0.5f);
+    CHECK((gold_max.min + gold_max.max) * 0.5f > 950.0f);
+    const float gold_width = gold_zero.max - gold_zero.min;
+    for (const Span span : {gold_one, gold_low, gold_middle, gold_max})
+        CHECK(std::abs((span.max - span.min) - gold_width) < 0.01f); // a constant-width marker
+    for (const float scale : {1.0f, 1.5f, 2.25f}) {
+        const Span span = gold_span(0.0f, 1000.0f * scale, 50000000, kNumberThumbMinWidth * scale);
+        CHECK(std::abs((span.min + span.max) * 0.5f - 500.0f * scale) < 1.0f);
+        CHECK(std::abs((span.max - span.min) - kNumberThumbMinWidth * scale) < 0.01f);
+    }
+
 #ifdef DCP_SOURCE_DIR
     const std::string page = ReadSource("launcher/editor_page.cpp");
     const size_t start = page.find("bool EditorPage::NumberControl(");
@@ -2679,15 +3002,20 @@ void TestEditorNumberControlLook() {
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
     CHECK(control.find("##minus") < control.find("SliderInt(\"##value\"") && control.find("SliderInt(\"##value\"") < control.find("##plus"));
     CHECK(control.find("DragInt(\"##value\", &shown, drag_speed") != std::string::npos);
-    CHECK(control.find("ImGuiStyleVar_GrabMinSize, kNumberThumbMinWidth * scale") != std::string::npos);
+    CHECK(control.find("const bool thumb = positional_marker || NumberHasThumb(range);") != std::string::npos);
+    CHECK(control.find("ImGuiStyleVar_GrabMinSize, grab_min") != std::string::npos && control.find("grab_min = kNumberThumbMinWidth * scale") != std::string::npos);
     CHECK(control.find("ProgressFraction") == std::string::npos && control.find("AddRectFilled") == std::string::npos);
     CHECK(control.find("InvisibleButton") == std::string::npos && control.find("drag_remainder_") == std::string::npos);
-    CHECK(control.find("ImGuiCol_Text, accent") != std::string::npos && control.find("NoInput") != std::string::npos);
-    CHECK(control.find("FormatThousands") != std::string::npos && control.find("ParseNumber(") != std::string::npos);
+    CHECK(control.find("color = IM_COL32_WHITE;") != std::string::npos && control.find("GetColorU32(accent)") != std::string::npos && control.find("NoInput") != std::string::npos);
+    CHECK(control.find("FormatThousands") != std::string::npos && control.find("CommitTypedNumber(") != std::string::npos);
     CHECK(control.find("SetTooltip") == std::string::npos);
     CHECK(page.find("Drag to adjust") == std::string::npos);
     CHECK(ReadSource("launcher/localization/pt_br_ui_text.cpp").find("Drag to adjust") == std::string::npos);
-    CHECK(Count(page, "NumberControl(ui, ") == 4); // Level, Skill Points, Current HP, Max HP share it; there is no Gold
+    CHECK(Count(page, "NumberControl(ui, ") == 7); // Gold, Level, Skill Points, HP and the stat rows share it
+    const size_t editor_start = page.find("void EditorPage::DrawCharacterEditor(");
+    const std::string editor = page.substr(editor_start, page.find("\n}\n", editor_start) - editor_start);
+    CHECK(editor.find("NumberControl(ui, \"gold\", &gold, kGoldRange, 0.25f, changed_style(gold_changed), true)") !=
+          std::string::npos);
 #endif
 }
 
@@ -2751,7 +3079,8 @@ void TestEditorDirtyFields() {
     CHECK(page.find("saved->hp_current != character.hp_current") != std::string::npos);
     CHECK(page.find("saved->hp_max != character.hp_max") != std::string::npos);
     CHECK(page.find("FieldStyleFor(saved->name, character.name)") != std::string::npos);
-    CHECK(page.find("gold") == std::string::npos);
+    CHECK(page.find("edit_->persisted().Slot(selected_slot_)") != std::string::npos);
+    CHECK(page.find("SetGold(selected_slot_") != std::string::npos);
     CHECK(page.find("edit_->persisted()") != std::string::npos);
 #endif
 }
@@ -2814,7 +3143,7 @@ void TestEditorHeaderRow() {
     const size_t portrait = editor.find("DrawArt(");
     CHECK(back != std::string::npos && title != std::string::npos);
     CHECK(title < back && back < portrait);
-    CHECK(editor.find("ui.Heading(") == std::string::npos);
+    CHECK(Count(editor, "ui.Heading(") == 1 && editor.find("ui.Heading(Tr(\"Stats\"));") != std::string::npos);
     CHECK(editor.find("LayoutCharacterSummary(") != std::string::npos);
     CHECK(page.find("DrawChanges(ui);") < page.find("DrawCharacter(ui);"));
     const size_t row_start = page.find("void EditorPage::DrawChanges(");
@@ -2907,7 +3236,7 @@ void TestEditorCompactLayout() {
     // Character Editor header: title on the left, Back to Characters right after it on the same row.
     const size_t editor_start = page.find("void EditorPage::DrawCharacterEditor(");
     const std::string editor = page.substr(editor_start, page.find("\n}\n", editor_start) - editor_start);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") != std::string::npos);
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(Count(editor, "Tr(\"Character Editor\")") == 1);
     // Back to Characters sits right after the title: no width sums, no right alignment.
     const std::string title_row = FunctionBody(page, "bool EditorPage::TitleWithButton(");
@@ -2998,19 +3327,49 @@ void TestEditorFixedLayout() {
     const size_t level = editor.find("NumberControl(ui, \"level\"");
     const size_t row_skill = editor.find("ui.Row(Tr(\"Skill Points\")");
     const size_t skill = editor.find("NumberControl(ui, \"skill_points\"");
+    const size_t row_gold = editor.find("ui.Row(Tr(\"Gold\")");
+    const size_t gold = editor.find("NumberControl(ui, \"gold\"");
+    const size_t row_stats = editor.find("ui.Heading(Tr(\"Stats\"));");
     const size_t row_current = editor.find("ui.Row(Tr(\"Current HP\")");
     const size_t current = editor.find("NumberControl(ui, \"hp_current\"");
     const size_t row_max = editor.find("ui.Row(Tr(\"Max HP\")");
     const size_t maximum = editor.find("NumberControl(ui, \"hp_max\"");
+    const size_t row_str = editor.find("stat_row(Tr(\"STR (Strength)\")");
+    const size_t row_con = editor.find("stat_row(Tr(\"CON (Constitution)\")");
+    const size_t row_dex = editor.find("stat_row(Tr(\"DEX (Dexterity)\")");
+    const size_t row_int = editor.find("stat_row(Tr(\"INT (Intelligence)\")");
+    const size_t row_mgr = editor.find("stat_row(Tr(\"MGR (Magic Resistance)\")");
+    const size_t row_luc = editor.find("stat_row(Tr(\"LUC (Luck)\")");
     const size_t end_rows = editor.find("ui.EndRows();");
     CHECK(row_name != std::string::npos && row_name < name && name < row_level && row_level < level);
-    CHECK(level < row_skill && row_skill < skill && skill < row_current && row_current < current);
-    CHECK(current < row_max && row_max < maximum && maximum < end_rows);
-    CHECK(Count(editor, "ui.Row(") == 5 && Count(editor, "ui.EndRows();") == 1);
+    CHECK(level < row_skill && row_skill < skill && skill < row_gold && row_gold < gold && gold < row_stats);
+    CHECK(row_stats < row_current);
+    CHECK(row_current < current && current < row_max && row_max < maximum && maximum < row_str);
+    CHECK(row_str < row_con && row_con < row_dex && row_dex < row_int && row_int < row_mgr && row_mgr < row_luc);
+    CHECK(row_luc < end_rows);
+    for (const char* control : {"stat_strength", "stat_constitution", "stat_dexterity", "stat_intelligence",
+                                "stat_magic_resistance", "stat_luck"}) {
+        CHECK(editor.find(std::string("\"") + control + "\"") != std::string::npos);
+    }
+    // The numeric fields are the only authority: no separate override control or reset-to-native action exists.
+    CHECK(editor.find("HP Override") == std::string::npos && editor.find("Use Game Value") == std::string::npos);
+    CHECK(editor.find("Reset Override") == std::string::npos && editor.find("Auto") == std::string::npos);
+    CHECK(page.find("HP Override") == std::string::npos && page.find("Use Game Value") == std::string::npos);
+    CHECK(Count(editor, "ui.Row(") == 7 && Count(editor, "stat_row(") == 6 && Count(editor, "ui.EndRows();") == 1);
     CHECK(editor.find("ui.Row(Tr(\"Level\"));") != std::string::npos);
     CHECK(editor.find("stored value is level minus one") == std::string::npos);
-    CHECK(ReadSource("launcher/localization/pt_br_ui_text.cpp").find("stored value is level minus one") == std::string::npos);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") != std::string::npos);
+    const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
+    CHECK(portuguese.find("stored value is level minus one") == std::string::npos);
+    for (const char* text : {"\nGold\tOuro\n", "\nGold belongs to this save data\tOuro pertence a este save\n",
+                             "\nStats\tAtributos\n", "\nSTR (Strength)\tSTR (For\xC3\xA7" "a)\n",
+                             "\nCON (Constitution)\tCON (Constitui\xC3\xA7\xC3\xA3" "o)\n",
+                             "\nDEX (Dexterity)\tDEX (Destreza)\n",
+                             "\nINT (Intelligence)\tINT (Intelig\xC3\xAAncia)\n",
+                             "\nMGR (Magic Resistance)\tMGR (Resist\xC3\xAAncia M\xC3\xA1gica)\n",
+                             "\nLUC (Luck)\tLUC (Sorte)\n"}) {
+        CHECK(portuguese.find(text) != std::string::npos);
+    }
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") != std::string::npos);
     CHECK(editor.find("Button(Tr(\"Back to Characters\"), ") == std::string::npos);
     CHECK(page.find("1.35f") == std::string::npos && page.find("* 1.2f") == std::string::npos);
     CHECK(page.find("GridColumns(available, kCardMinWidth * scale") != std::string::npos);
@@ -3024,7 +3383,7 @@ void TestEditorFixedLayout() {
     CHECK(control.find("LayoutNumberControl(") != std::string::npos);
     CHECK(control.find("ImGui::SetNextItemWidth(field)") != std::string::npos && control.find("ImVec2(button, height)") != std::string::npos);
     CHECK(control.find("StepNumber(*value, -1, range)") != std::string::npos && control.find("StepNumber(*value, 1, range)") != std::string::npos);
-    CHECK(control.find("ParseNumber(") != std::string::npos && control.find("FormatThousands") != std::string::npos);
+    CHECK(control.find("CommitTypedNumber(") != std::string::npos && control.find("FormatThousands") != std::string::npos);
     CHECK(control.find("SetTooltip") == std::string::npos && control.find("FieldStyle::kChanged") != std::string::npos);
     CHECK(page.find("full_frame_height_") == std::string::npos);
 
@@ -3186,7 +3545,7 @@ void TestAppearanceUx() {
     // Character Editor: one way into Appearance, in the summary row at the right, after the portrait and text.
     const std::string editor = FunctionBody(page, "void EditorPage::DrawCharacterEditor(");
     CHECK(Count(page, "Tr(\"Edit Appearance\")") == 1 && Count(page, "RequestAppearance();") == 1);
-    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"))") < editor.find("DrawArt("));
+    CHECK(editor.find("TitleWithButton(ui, Tr(\"Character Editor\"), Tr(\"Back to Characters\"), ButtonIcon::kBack)") < editor.find("DrawArt("));
     CHECK(editor.find("DrawArt(") < editor.find("Tr(\"Edit Appearance\")"));
     CHECK(editor.find("LayoutCharacterSummary(") < editor.find("Tr(\"Edit Appearance\")"));
     CHECK(editor.find("Tr(\"Appearance\")") == std::string::npos && editor.find("nav_.RequestAppearance") == std::string::npos);
@@ -7136,7 +7495,7 @@ void TestCompactSummary() {
     const std::string editor = FunctionBody(page, "void EditorPage::DrawCharacterEditor(");
     CHECK(editor.find("LayoutCharacterSummary(row_width") != std::string::npos);
     CHECK(editor.find("trg::layout::ControlColumnWidth(row_width, scale)") != std::string::npos);
-    CHECK(editor.find("ImGui::Button(Tr(\"Edit Appearance\"), ImVec2(layout.button_width, layout.button_height))") != std::string::npos);
+    CHECK(editor.find("IconButton(Tr(\"Edit Appearance\"), [this](int pixels) { return ButtonIconTexture(ButtonIcon::kAppearance, pixels); }, ImVec2(buttons.width, layout.button_height))") != std::string::npos);
     CHECK(editor.find("ImGui::SameLine(row_start + layout.button_x)") < editor.find("Tr(\"Edit Appearance\")"));
     CHECK(editor.find("DrawIdentity(ui, ") != std::string::npos && editor.find("Tr(\"Lv\")") != std::string::npos);
     CHECK(editor.find("72.0f") == std::string::npos && editor.find("class_text") == std::string::npos);
@@ -7148,7 +7507,7 @@ void TestCompactSummary() {
     CHECK(view.find("InvisibleButton(\"##figure\", ImVec2(avail.x, figure_height))") != std::string::npos);
     CHECK(view.find("fit.x - float(crop->x0) * fit.scale") != std::string::npos); // hit testing follows the crop
     CHECK(view.find("DrawIdentity(ui, ImGui::GetCursorScreenPos(), identity, identity_size.y)") < view.find("DrawCustom(ui, character, look);"));
-    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"))") < view.find("BeginTable("));
+    CHECK(view.find("TitleWithButton(ui, Tr(\"Appearance\"), Tr(\"Back to Character Editor\"), ButtonIcon::kBack)") < view.find("BeginTable("));
     const std::string portuguese = ReadSource("launcher/localization/pt_br_ui_text.cpp");
     for (const char* text : {"\nTattoo\tTatuagem\n", "\nBodice\t", "\nBoots\t"}) CHECK(portuguese.find(text) != std::string::npos);
     CHECK(portuguese.find("\nBack to Character Editor\tVoltar ao editor de personagem\n") != std::string::npos);
@@ -7631,6 +7990,12 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestSaveEdit(base);
              TestInvalidAppearance(base);
              TestNoChangeGuarantee();
+             TestDifficultyModel();
+             TestDifficultySlots();
+             TestDifficultyUltimate(base);
+             TestDifficultyEdit(base);
+             TestDifficultyRealSave(source);
+             TestDifficultyPage();
          }},
         {"editor-isolation", false,
          [&] {
@@ -7642,6 +8007,7 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
         {"editor-apply-discard", false,
          [&] {
              TestApplyAll(base);
+             TestGoldEditing(base);
              TestEditorDirtyFields();
              TestEditorBuildChoice();
              TestEditorNumbers();

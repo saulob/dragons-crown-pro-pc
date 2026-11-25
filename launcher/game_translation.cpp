@@ -18,6 +18,7 @@
 #include "dcp_launcher.h"
 #include "fms_sheet.h"
 #include "game_files.h"
+#include "hangul_font.h"
 #include "latin_font.h"
 #include "latin_glyphs.h"
 #include "net/json.h"
@@ -39,6 +40,29 @@ const std::vector<std::string>* served_default_bone = nullptr; // the records of
 const std::vector<std::string>* served_native_default_bone = nullptr; // and the slot's own
 std::vector<DcpComposedGlyph> served_composed_glyphs;
 std::vector<CyrillicMetrics> served_cyrillic_metrics;
+std::vector<HangulGlyph> served_hangul_glyphs;
+
+// The embedded Hangul file, parsed once: the loader fits it before the translation serves anything, and the runtime's
+// glyph table borrows its entries for the life of the process.
+struct HangulAtlas {
+    bool parsed = false;
+    std::vector<HangulCell> cells;
+    std::vector<HangulGlyph> glyphs;
+};
+HangulAtlas hangul_atlas;
+
+const HangulAtlas& HangulAtlasOf() {
+    if (!hangul_atlas.parsed) {
+        hangul_atlas.parsed = true;
+        if (const TranslationFile* file = KoreanGlyphs()) {
+            if (std::optional<std::vector<HangulCell>> cells = ParseHangulGlyphs({file->data, file->size})) {
+                hangul_atlas.cells = std::move(*cells);
+                for (const HangulCell& cell : hangul_atlas.cells) hangul_atlas.glyphs.push_back(cell.glyph);
+            }
+        }
+    }
+    return hangul_atlas;
+}
 
 } // namespace
 
@@ -58,6 +82,10 @@ extern const TranslationFile kRuSources[];
 extern const size_t kRuSourcesCount;
 extern const TranslationFile kRuFont[];
 extern const size_t kRuFontCount;
+extern const TranslationFile kKoTranslation[];
+extern const size_t kKoTranslationCount;
+extern const TranslationFile kKoFont[];
+extern const size_t kKoFontCount;
 
 namespace {
 
@@ -426,6 +454,12 @@ std::span<const TranslationFile> RussianTranslationFiles() { return {kRuTranslat
 const TranslationFile* RussianGlyphs() {
     return kRuFontCount == 1 ? &kRuFont[0] : nullptr;
 }
+
+std::span<const TranslationFile> KoreanTranslationFiles() { return {kKoTranslation, kKoTranslationCount}; }
+
+const TranslationFile* KoreanGlyphs() {
+    return kKoFontCount == 1 ? &kKoFont[0] : nullptr;
+}
 std::span<const TranslationFile> PtBrVisualPatches() { return {kPtBrVisualPatches, kPtBrVisualPatchesCount}; }
 
 std::vector<TranslationFile> PtBrVisualPatches(VisualSet set) {
@@ -711,6 +745,29 @@ std::optional<std::vector<uint8_t>> FontWithCyrillic(const CpkArchive& archive, 
     return font;
 }
 
+// The main font with the Korean syllables, or why not: without them the text would show nothing.
+std::optional<std::vector<uint8_t>> FontWithHangul(const CpkArchive& archive, const TranslationRecipe& recipe, std::string& why,
+                                                   std::vector<HangulGlyph>& glyphs) {
+    if (!recipe.glyph_table) {
+        why = "the executable's glyph table cannot take the syllables";
+        return std::nullopt;
+    }
+    const HangulAtlas& atlas = HangulAtlasOf();
+    if (!recipe.hangul_glyphs || atlas.cells.empty()) {
+        why = "the syllables are missing from the launcher";
+        return std::nullopt;
+    }
+    const CpkEntry* entry = archive.Find(recipe.hangul->entry);
+    std::vector<uint8_t> font = entry ? archive.Read(*entry, &why) : std::vector<uint8_t>();
+    if (font.empty()) {
+        if (why.empty()) why = "not in the archive";
+        return std::nullopt;
+    }
+    if (!ComposeHangulFont(font, atlas.cells, &why)) return std::nullopt;
+    glyphs = atlas.glyphs;
+    return font;
+}
+
 } // namespace
 
 ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, std::string_view suffix,
@@ -772,6 +829,15 @@ ArchiveTranslation TranslateArchive(const std::filesystem::path& archive_path, c
             return result;
         }
         sheets.emplace_back(std::string(recipe.cyrillic->entry), std::move(*font));
+    }
+    if (recipe.hangul) {
+        std::string why;
+        std::optional<std::vector<uint8_t>> font = FontWithHangul(archive, recipe, why, result.hangul_glyphs);
+        if (!font) {
+            result.error = std::string(recipe.hangul->entry) + ": " + why;
+            return result;
+        }
+        sheets.emplace_back(std::string(recipe.hangul->entry), std::move(*font));
     }
     bool fold = false;
     if (!recipe.font_entry.empty()) {
@@ -856,6 +922,29 @@ extern "C" const CyrillicMetrics* dcp_text_cyrillic_metrics(size_t* count) {
     return *count ? dcp::served_cyrillic_metrics.data() : nullptr;
 }
 
+extern "C" const HangulGlyph* dcp_text_hangul_glyphs(size_t* count) {
+    *count = dcp::served_hangul_glyphs.size();
+    return *count ? dcp::served_hangul_glyphs.data() : nullptr;
+}
+
+/* The saved language is the port's Korean on a build whose main font takes the syllables: the probe character and the
+ * syllables themselves, for the loader's fit check before anything is served. */
+extern "C" unsigned dcp_text_hangul_probe(const char* settings_file, const char* image_dir, const char* app0,
+                                          const HangulGlyph** glyphs, size_t* count) {
+    using namespace dcp;
+    if (glyphs) *glyphs = nullptr;
+    if (count) *count = 0;
+    const GameBuild* build = BuildOfImageDir(image_dir);
+    if (!build || build->translation->hangul.entry.empty()) return 0;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::vector<TextLanguage> languages = InstalledTextLanguages(PathFromUtf8(app0 ? app0 : ""), build);
+    if (ResolveTextLanguage(languages, settings.Get(kTextLanguageKey)).translation != kPortKorean) return 0;
+    const HangulAtlas& atlas = HangulAtlasOf();
+    if (glyphs) *glyphs = atlas.glyphs.empty() ? nullptr : atlas.glyphs.data();
+    if (count) *count = atlas.glyphs.size();
+    return build->translation->hangul.probe;
+}
+
 extern "C" int dcp_text_cyrillic_cells(const char* settings_file, const char* image_dir, const char* app0, unsigned* probe) {
     using namespace dcp;
     *probe = 0;
@@ -905,6 +994,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     served_native_default_bone = nullptr;
     served_composed_glyphs.clear();
     served_cyrillic_metrics.clear();
+    served_hangul_glyphs.clear();
     if (language.translation.empty() || !build) return nullptr;
     const TranslationProfile& profile = *build->translation;
     const std::string name(language.name);
@@ -915,6 +1005,7 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     TranslationRecipe recipe{language.suffix, {}};
     if (language.translation == "pt-BR") {
         recipe.files = PtBrTranslationFiles();
+        recipe.same_arguments = true;
         if (same_archive) recipe.visual_patches = visuals;
         if (!profile.source.empty()) recipe.adapted_texts = recipe.source = PtBrSource(profile.source);
         recipe.font_entry = profile.font_entry;
@@ -936,6 +1027,12 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
         }
         recipe.cyrillic = &profile.cyrillic;
         recipe.cyrillic_glyphs = RussianGlyphs();
+    } else if (language.translation == kPortKorean && !profile.hangul.entry.empty()) {
+        recipe.files = KoreanTranslationFiles();
+        recipe.text_key = "ko";
+        recipe.same_arguments = true; // the Korean text words its colours and tags its own way
+        recipe.hangul = &profile.hangul;
+        recipe.hangul_glyphs = KoreanGlyphs();
     }
     recipe.mark_archive = folder / kSharedArchive;
     recipe.glyph_table = glyph_table != 0;
@@ -971,6 +1068,9 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     }
     if (translation.latin_glyphs) text += "; accented letters composed from the installed font";
     if (!translation.cyrillic_metrics.empty()) text += "; Cyrillic letters drawn into the font";
+    if (!translation.hangul_glyphs.empty()) {
+        text += "; " + std::to_string(translation.hangul_glyphs.size()) + " Hangul syllables drawn into the font";
+    }
     for (const std::string& skipped : translation.visual_problems) std::printf("Menu & Subtitles: PT-BR visual skipped: %s\n", skipped.c_str());
     if (translation.refused || translation.folded) {
         const size_t refused = translation.refused;
@@ -980,10 +1080,14 @@ extern "C" const char* dcp_text_translation(const char* settings_file, const cha
     }
     std::snprintf(message, message_size, "%s", text.c_str());
     if (!translation.error.empty() || !translation.overlay) return nullptr;
-    if (glyphs_composed) *glyphs_composed = translation.latin_glyphs || !translation.cyrillic_metrics.empty();
+    if (glyphs_composed) {
+        *glyphs_composed = translation.latin_glyphs || !translation.cyrillic_metrics.empty() ||
+                           !translation.hangul_glyphs.empty();
+    }
     served_default_bone = &translation.default_bone;
     served_native_default_bone = &translation.native_default_bone;
     served_cyrillic_metrics = translation.cyrillic_metrics;
+    served_hangul_glyphs = translation.hangul_glyphs;
     if (translation.latin_glyphs) {
         for (const LatinCell& cell : translation.latin_cells) {
             served_composed_glyphs.push_back({cell.code, uint8_t(cell.base), cell.alpha.data(), cell.base_alpha.data()});

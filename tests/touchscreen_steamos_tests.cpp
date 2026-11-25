@@ -457,36 +457,201 @@ void TestGamescopePolicy() {
 
     CHECK(DCP_GAMESCOPE_TOUCH_PASSTHROUGH == 4u && DCP_GAMESCOPE_TOUCH_LEFT == 1u);
     CHECK(std::string(DCP_GAMESCOPE_TOUCH_ATOM) == "STEAM_TOUCH_CLICK_MODE");
+    CHECK(std::string(DCP_GAMESCOPE_TOUCH_MARKER_ATOM) == "GAMESCOPE_INPUT_COUNTER");
+
+    // Steam can take the mode back at any time, so the rewrite is fast but never per frame.
+    CHECK(DCP_GAMESCOPE_TOUCH_RECHECK_MS <= 1000u && DCP_GAMESCOPE_TOUCH_RECHECK_MS >= 250u);
+    CHECK(DCP_GAMESCOPE_TOUCH_MAX_ROOTS >= 2);
 }
 
+// Gamescope keeps one touch mode for the whole compositor: a write on any of its Xwayland roots wins, whatever the other
+// roots still hold. DCP-Y9F9QZ is exactly this: the game's root reads Passthrough while Steam's root reads Left.
+struct GamescopeRoots {
+    std::vector<std::uint32_t> value;
+    std::vector<bool> open;
+    std::vector<DcpTouchModeRoot> mode;
+    std::uint32_t effective = DCP_GAMESCOPE_TOUCH_LEFT;
+    bool attached = false; // the game holds an X connection to the roots
+
+    explicit GamescopeRoots(std::uint32_t game = DCP_GAMESCOPE_TOUCH_LEFT,
+                            std::uint32_t steam = DCP_GAMESCOPE_TOUCH_LEFT)
+        : value{game, steam}, open(2, true), mode(2) {}
+
+    void Write(std::size_t root, std::uint32_t mode_value) {
+        value[root] = mode_value;
+        effective = mode_value;
+    }
+    void Steam(std::size_t root, std::uint32_t mode_value) { Write(root, mode_value); }
+
+    // The window's Acquire: the reachable roots are claimed and written; the claim always writes Passthrough.
+    int Claim() {
+        int written = 0;
+        attached = true;
+        for (std::size_t i = 0; i < value.size(); ++i) {
+            if (!open[i]) continue;
+            dcp_touch_mode_claim(&mode[i], 1, value[i]);
+            Write(i, DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+            ++written;
+        }
+        return written;
+    }
+
+    bool Maintain() {
+        if (!attached) return false;
+        bool written = false;
+        for (std::size_t i = 0; i < value.size(); ++i) {
+            if (!open[i]) continue;
+            dcp_touch_mode_claim(&mode[i], 1, value[i]);
+            Write(i, DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+            written = true;
+        }
+        return written;
+    }
+
+    int Release() {
+        if (!attached) return 0;
+        attached = false;
+        int restored = 0;
+        for (std::size_t i = 0; i < value.size(); ++i) {
+            std::uint32_t next = 0;
+            if (dcp_touch_mode_release(&mode[i], open[i] ? 1 : 0, value[i], &next)) {
+                Write(i, next);
+                ++restored;
+            }
+        }
+        return restored;
+    }
+};
+
 void TestModeOwnership() {
+    // A fresh root (Gamescope's default, property absent) is claimed and given back as Left.
+    DcpTouchModeRoot fresh{};
+    dcp_touch_mode_claim(&fresh, 0, 0);
+    CHECK(fresh.owned && fresh.saved == DCP_GAMESCOPE_TOUCH_LEFT);
     uint32_t value = 0;
-    // Gamescope's default (property absent): claim, then give back Left.
-    DcpTouchModeState state{};
-    CHECK(dcp_touch_mode_claim(&state, 0, 0, &value) == DCP_TOUCH_MODE_WRITE && value == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
-    CHECK(dcp_touch_mode_claim(&state, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_KEEP);
-    CHECK(dcp_touch_mode_release(&state, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_WRITE &&
-          value == DCP_GAMESCOPE_TOUCH_LEFT && !state.applied);
+    CHECK(dcp_touch_mode_release(&fresh, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 1 && value == DCP_GAMESCOPE_TOUCH_LEFT);
+    CHECK(!fresh.owned);
+    CHECK(dcp_touch_mode_release(&fresh, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 0); // a second release is harmless
 
     // Steam's own mode is remembered and restored.
-    DcpTouchModeState steam{};
-    CHECK(dcp_touch_mode_claim(&steam, 1, 2u, &value) == DCP_TOUCH_MODE_WRITE && steam.saved == 2u);
-    CHECK(dcp_touch_mode_release(&steam, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_WRITE && value == 2u);
+    DcpTouchModeRoot steam{};
+    dcp_touch_mode_claim(&steam, 1, 2u);
+    CHECK(steam.saved == 2u);
+    CHECK(dcp_touch_mode_release(&steam, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 1 && value == 2u);
 
-    // Steam changes the mode while the game runs: the game takes it back, and later restores Steam's value.
-    DcpTouchModeState race{};
-    dcp_touch_mode_claim(&race, 1, 1u, &value);
-    CHECK(dcp_touch_mode_claim(&race, 1, 0u, &value) == DCP_TOUCH_MODE_WRITE && race.saved == 0u);
-    CHECK(dcp_touch_mode_release(&race, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_WRITE && value == 0u);
+    // Steam changes the mode while the game runs: the game takes it back and later restores Steam's value.
+    DcpTouchModeRoot race{};
+    dcp_touch_mode_claim(&race, 1, 1u);
+    dcp_touch_mode_claim(&race, 1, 0u);
+    CHECK(race.saved == 0u && race.owned);
+    CHECK(dcp_touch_mode_release(&race, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 1 && value == 0u);
 
-    // Someone else already set Passthrough, or changed it away from the game's: nothing is written back.
-    DcpTouchModeState other{};
-    CHECK(dcp_touch_mode_claim(&other, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_KEEP && !other.applied);
-    CHECK(dcp_touch_mode_release(&other, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == DCP_TOUCH_MODE_KEEP);
-    DcpTouchModeState changed{};
-    dcp_touch_mode_claim(&changed, 1, 1u, &value);
-    CHECK(dcp_touch_mode_release(&changed, 1, 6u, &value) == DCP_TOUCH_MODE_KEEP && !changed.applied);
-    CHECK(dcp_touch_mode_release(&changed, 0, 0, &value) == DCP_TOUCH_MODE_KEEP); // a second release is harmless
+    // A root that already reads Passthrough is still claimed and rewritten, but the release writes nothing back:
+    // Passthrough was not a value the game took away (this is the DCP-Y9F9QZ stale-root case).
+    DcpTouchModeRoot already{};
+    dcp_touch_mode_claim(&already, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    CHECK(already.owned && already.saved == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    CHECK(dcp_touch_mode_release(&already, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 0 && !already.owned);
+
+    // Someone else changed it away from Passthrough: nothing stale is written back.
+    DcpTouchModeRoot changed{};
+    dcp_touch_mode_claim(&changed, 1, 1u);
+    CHECK(dcp_touch_mode_release(&changed, 1, 6u, &value) == 0 && !changed.owned);
+    CHECK(dcp_touch_mode_release(&changed, 0, 0, &value) == 0);
+
+    // Each root keeps its own value: two roots that started differently are restored independently.
+    DcpTouchModeRoot game{};
+    DcpTouchModeRoot compositor{};
+    dcp_touch_mode_claim(&game, 1, 1u);
+    dcp_touch_mode_claim(&compositor, 1, 6u);
+    CHECK(dcp_touch_mode_release(&game, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 1 && value == 1u);
+    CHECK(dcp_touch_mode_release(&compositor, 1, DCP_GAMESCOPE_TOUCH_PASSTHROUGH, &value) == 1 && value == 6u);
+}
+
+// DCP-Y9F9QZ: Steam reaches its own root while the game's root already reads Passthrough.
+void TestCompetingWriteOnAnotherRootIsReasserted() {
+    GamescopeRoots session;
+    CHECK(session.Claim() == 2 && session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+
+    session.Steam(1, DCP_GAMESCOPE_TOUCH_LEFT);
+    CHECK(session.value[0] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH && session.effective == DCP_GAMESCOPE_TOUCH_LEFT);
+
+    CHECK(session.Maintain());
+    CHECK(session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    CHECK(session.value[0] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH && session.value[1] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    CHECK(session.mode[1].saved == DCP_GAMESCOPE_TOUCH_LEFT); // the release gives Steam's own choice back
+
+    // Steam keeps rewriting its root: every later maintenance pass restores Passthrough.
+    for (int i = 0; i < 3; ++i) {
+        session.Steam(1, DCP_GAMESCOPE_TOUCH_LEFT);
+        CHECK(session.Maintain());
+        CHECK(session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    }
+}
+
+// DCP-Y9F9QZ as the report log shows it: the game's root still held a Passthrough left by an earlier session, so the old
+// claim kept that value and wrote nothing while Gamescope's mode had already been set to Left from Steam's root.
+void TestStalePassthroughRootIsRewritten() {
+    GamescopeRoots session(DCP_GAMESCOPE_TOUCH_PASSTHROUGH, DCP_GAMESCOPE_TOUCH_LEFT);
+    session.effective = DCP_GAMESCOPE_TOUCH_LEFT;
+    CHECK(session.value[0] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH && session.effective == DCP_GAMESCOPE_TOUCH_LEFT);
+
+    CHECK(session.Claim() == 2); // the claim writes even though the game's own root already read Passthrough
+    CHECK(session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+
+    // Only the root that actually held Left is given back; the stale Passthrough is not re-imposed.
+    CHECK(session.Release() == 1);
+    CHECK(session.value[0] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH && session.value[1] == DCP_GAMESCOPE_TOUCH_LEFT);
+    CHECK(session.effective == DCP_GAMESCOPE_TOUCH_LEFT);
+}
+
+void TestBothRootsStartLeft() {
+    GamescopeRoots session;
+    CHECK(session.Claim() == 2);
+    CHECK(session.value[0] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH && session.value[1] == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    CHECK(session.mode[0].saved == DCP_GAMESCOPE_TOUCH_LEFT && session.mode[1].saved == DCP_GAMESCOPE_TOUCH_LEFT);
+}
+
+void TestOneRootUnavailable() {
+    GamescopeRoots session;
+    session.open[0] = false;
+    CHECK(session.Claim() == 1);
+    CHECK(session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    session.Steam(1, DCP_GAMESCOPE_TOUCH_LEFT);
+    CHECK(session.Maintain() && session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+
+    // The reachable root is still restored on release; the closed one is left alone.
+    CHECK(session.Release() == 1 && session.value[1] == DCP_GAMESCOPE_TOUCH_LEFT);
+}
+
+void TestNoRootAvailable() {
+    GamescopeRoots session;
+    session.open[0] = false;
+    session.open[1] = false;
+    CHECK(session.Claim() == 0);
+    CHECK(session.effective == DCP_GAMESCOPE_TOUCH_LEFT); // Gamescope's own handling remains
+    CHECK(!session.Maintain());
+    CHECK(session.Release() == 0);
+}
+
+void TestFocusReleaseAndRegain() {
+    GamescopeRoots session;
+    CHECK(session.Claim() == 2);
+
+    // Focus loss gives every root its own value back.
+    CHECK(session.Release() == 2);
+    CHECK(session.value[0] == DCP_GAMESCOPE_TOUCH_LEFT && session.value[1] == DCP_GAMESCOPE_TOUCH_LEFT);
+    CHECK(!session.mode[0].owned && !session.mode[1].owned);
+    CHECK(!session.Maintain()); // nothing to reassert while the game is not the owner
+
+    // Steam's newer choice is not overwritten by a stale saved value.
+    session.Steam(0, 2u);
+    CHECK(session.Release() == 0 && session.value[0] == 2u);
+
+    // Focus regain claims again from the current values.
+    CHECK(session.Claim() == 2);
+    CHECK(session.effective == DCP_GAMESCOPE_TOUCH_PASSTHROUGH);
+    CHECK(session.mode[0].saved == 2u && session.mode[1].saved == DCP_GAMESCOPE_TOUCH_LEFT);
 }
 
 void TestVideoBackendDecision() {
@@ -525,7 +690,9 @@ bool RouteLineIsSafe(const std::string& line) {
     static const std::regex pattern(
         "^Touchscreen telemetry: event=(touch_route_ready|touch_route_updated) video=(wayland|x11|windows|other|none) "
         "gamescope=(yes|no) direct_devices=[0-9]{1,2} count=1$|"
-        "^Touchscreen telemetry: event=touchscreen_fallback_(used|unavailable) source=gamescope count=1$");
+        "^Touchscreen telemetry: event=gamescope_touch_claim roots=[0-9] compositor=(yes|no) count=1$|"
+        "^Touchscreen telemetry: event=gamescope_touch_claim_failed reason=(x11|display) count=1$|"
+        "^Touchscreen telemetry: event=gamescope_touch_reassert roots=[0-9] count=[0-9]{1,10}$");
     return std::regex_match(line, pattern);
 }
 
@@ -540,7 +707,7 @@ std::vector<std::string> Route(DcpTouchRouteLog& log, DcpTouchRouteEvent event, 
 
 void TestRouteTelemetry() {
     DcpTouchRouteLog log{};
-    const DcpTouchRouteInfo none{"wayland", 1, 0};
+    const DcpTouchRouteInfo none{"wayland", 1, 0, 0, 0, DCP_TOUCH_CLAIM_NO_X11};
     const auto ready = Route(log, DCP_TOUCH_ROUTE_READY, none);
     CHECK(ready.size() == 1 &&
           ready[0] == "Touchscreen telemetry: event=touch_route_ready video=wayland gamescope=yes direct_devices=0 count=1");
@@ -548,25 +715,54 @@ void TestRouteTelemetry() {
 
     // The first touch finds a device SDL had not listed: one update, and no more.
     CHECK(Route(log, DCP_TOUCH_ROUTE_UPDATED, none).empty());
-    const DcpTouchRouteInfo found{"wayland", 1, 1};
+    const DcpTouchRouteInfo found{"wayland", 1, 1, 0, 0, DCP_TOUCH_CLAIM_NO_X11};
     const auto updated = Route(log, DCP_TOUCH_ROUTE_UPDATED, found);
     CHECK(updated.size() == 1 &&
           updated[0] == "Touchscreen telemetry: event=touch_route_updated video=wayland gamescope=yes direct_devices=1 count=1");
-    CHECK(Route(log, DCP_TOUCH_ROUTE_UPDATED, DcpTouchRouteInfo{"wayland", 1, 2}).empty());
+    CHECK(Route(log, DCP_TOUCH_ROUTE_UPDATED, DcpTouchRouteInfo{"wayland", 1, 2, 0, 0, DCP_TOUCH_CLAIM_NO_X11}).empty());
 
     DcpTouchRouteLog known{};
-    Route(known, DCP_TOUCH_ROUTE_READY, DcpTouchRouteInfo{"x11", 1, 1});
-    CHECK(Route(known, DCP_TOUCH_ROUTE_UPDATED, DcpTouchRouteInfo{"x11", 1, 1}).empty());
+    Route(known, DCP_TOUCH_ROUTE_READY, DcpTouchRouteInfo{"x11", 1, 1, 0, 0, DCP_TOUCH_CLAIM_NO_X11});
+    CHECK(Route(known, DCP_TOUCH_ROUTE_UPDATED, DcpTouchRouteInfo{"x11", 1, 1, 0, 0, DCP_TOUCH_CLAIM_NO_X11}).empty());
 
-    DcpTouchRouteLog fallback{};
-    const auto used = Route(fallback, DCP_TOUCH_ROUTE_FALLBACK_USED, found);
-    CHECK(used.size() == 1 && used[0] == "Touchscreen telemetry: event=touchscreen_fallback_used source=gamescope count=1");
-    CHECK(Route(fallback, DCP_TOUCH_ROUTE_FALLBACK_USED, found).empty());
-    const auto unavailable = Route(fallback, DCP_TOUCH_ROUTE_FALLBACK_FAILED, found);
-    CHECK(unavailable.size() == 1 &&
-          unavailable[0] == "Touchscreen telemetry: event=touchscreen_fallback_unavailable source=gamescope count=1");
-    CHECK(Route(fallback, static_cast<DcpTouchRouteEvent>(DCP_TOUCH_ROUTE_EVENT_COUNT), found).empty());
-    CHECK(Route(fallback, static_cast<DcpTouchRouteEvent>(-1), found).empty());
+    // A failed claim names why, once, and no reassert is reported without one.
+    DcpTouchRouteLog failed{};
+    const DcpTouchRouteInfo unavailable{"x11", 1, 1, 0, 0, DCP_TOUCH_CLAIM_NO_DISPLAY};
+    CHECK(Route(failed, DCP_TOUCH_ROUTE_REASSERT, unavailable).empty());
+    const auto failed_line = Route(failed, DCP_TOUCH_ROUTE_CLAIM_FAILED, unavailable);
+    CHECK(failed_line.size() == 1 &&
+          failed_line[0] == "Touchscreen telemetry: event=gamescope_touch_claim_failed reason=display count=1");
+    CHECK(Route(failed, DCP_TOUCH_ROUTE_CLAIM_FAILED, unavailable).empty());
+    CHECK(Route(failed, DCP_TOUCH_ROUTE_REASSERT, unavailable).empty());
+    DcpTouchRouteLog no_x11{};
+    CHECK(Route(no_x11, DCP_TOUCH_ROUTE_CLAIM_FAILED, DcpTouchRouteInfo{"x11", 1, 1, 0, 0, DCP_TOUCH_CLAIM_NO_X11})[0] ==
+          "Touchscreen telemetry: event=gamescope_touch_claim_failed reason=x11 count=1");
+
+    // The claim says how many roots answered and whether Gamescope's own root was among them.
+    DcpTouchRouteLog claimed{};
+    const DcpTouchRouteInfo both{"x11", 1, 1, 2, 1, DCP_TOUCH_CLAIM_NO_X11};
+    const auto claim = Route(claimed, DCP_TOUCH_ROUTE_CLAIMED, both);
+    CHECK(claim.size() == 1 &&
+          claim[0] == "Touchscreen telemetry: event=gamescope_touch_claim roots=2 compositor=yes count=1");
+    CHECK(Route(claimed, DCP_TOUCH_ROUTE_CLAIMED, both).empty());
+
+    // The periodic reassert is reported at the first and every tenth power, never per interval.
+    const std::vector<std::string> reasserts = [&claimed, &both] {
+        std::vector<std::string> out;
+        for (int i = 0; i < 10; ++i) {
+            for (const std::string& line : Route(claimed, DCP_TOUCH_ROUTE_REASSERT, both)) {
+                out.push_back(line);
+            }
+        }
+        return out;
+    }();
+    CHECK(reasserts.size() == 2);
+    CHECK(reasserts[0] == "Touchscreen telemetry: event=gamescope_touch_reassert roots=2 count=1");
+    CHECK(reasserts[1] == "Touchscreen telemetry: event=gamescope_touch_reassert roots=2 count=10");
+
+    DcpTouchRouteLog single{};
+    CHECK(Route(single, DCP_TOUCH_ROUTE_CLAIMED, DcpTouchRouteInfo{"x11", 1, 1, 1, 0, DCP_TOUCH_CLAIM_NO_X11})[0] ==
+          "Touchscreen telemetry: event=gamescope_touch_claim roots=1 compositor=no count=1");
 
     // Only known driver names reach a line; a device count is clamped; nothing else is formatted.
     CHECK(std::string(dcp_touch_video_name("wayland")) == "wayland" && std::string(dcp_touch_video_name("x11")) == "x11" &&
@@ -574,19 +770,24 @@ void TestRouteTelemetry() {
     CHECK(std::string(dcp_touch_video_name("kmsdrm")) == "other" && std::string(dcp_touch_video_name("/home/someone")) == "other" &&
           std::string(dcp_touch_video_name(nullptr)) == "none");
     DcpTouchRouteLog odd{};
-    const auto clamped = Route(odd, DCP_TOUCH_ROUTE_READY, DcpTouchRouteInfo{"Xbox Ally X", 0, 12345});
+    const auto clamped = Route(odd, DCP_TOUCH_ROUTE_READY, DcpTouchRouteInfo{"Xbox Ally X", 0, 12345, 0, 0, 0});
     CHECK(clamped.size() == 1 && Contains(clamped[0], "video=other") && Contains(clamped[0], "direct_devices=99") &&
           !Contains(clamped[0], "Ally"));
     DcpTouchRouteLog negative{};
-    CHECK(Contains(Route(negative, DCP_TOUCH_ROUTE_READY, DcpTouchRouteInfo{"x11", 0, -4})[0], "direct_devices=0"));
+    CHECK(Contains(Route(negative, DCP_TOUCH_ROUTE_READY, DcpTouchRouteInfo{"x11", 0, -4, 0, 0, 0})[0], "direct_devices=0"));
+    DcpTouchRouteLog many{};
+    CHECK(Contains(Route(many, DCP_TOUCH_ROUTE_CLAIMED, DcpTouchRouteInfo{"x11", 1, 1, 99, 1, 0})[0], "roots=9"));
 
-    for (const std::vector<std::string>* lines : {&ready, &updated, &used, &unavailable, &clamped}) {
+    for (const std::vector<std::string>* lines : {&ready, &updated, &claim, &failed_line, &reasserts, &clamped}) {
         for (const std::string& line : *lines) {
             CHECK(RouteLineIsSafe(line));
         }
     }
+    CHECK(Route(claimed, static_cast<DcpTouchRouteEvent>(DCP_TOUCH_ROUTE_EVENT_COUNT), both).empty());
+    CHECK(Route(claimed, static_cast<DcpTouchRouteEvent>(-1), both).empty());
     CHECK(!RouteLineIsSafe("Touchscreen telemetry: event=touch_route_ready video=wayland gamescope=yes direct_devices=1 x=480 count=1"));
     CHECK(!RouteLineIsSafe("Touchscreen telemetry: event=touch_route_ready video=Xbox gamescope=yes direct_devices=1 count=1"));
+    CHECK(!RouteLineIsSafe("Touchscreen telemetry: event=gamescope_touch_claim roots=2 compositor=yes display=:1 count=1"));
 }
 
 void TestTelemetryStaysBounded() {
@@ -623,15 +824,24 @@ void TestWindowSource() {
     CHECK(Pos(window, "DcpTouchRoute::AcceptedTouch(devices[i]") < claim && Pos(window, "LogGamescopeWindow();") < claim);
     const std::size_t destructor = Pos(window, "WindowSDL::~WindowSDL()");
     CHECK(Pos(window, "g_gamescope_touch.Release();", destructor) < Pos(window, "SDL_DestroyWindow(window);", destructor));
+    const std::size_t quit = Pos(window, "case SDL_EVENT_WINDOW_CLOSE_REQUESTED:");
+    CHECK(Pos(window, "g_gamescope_touch.Release();", quit) < Pos(window, "break;", quit));
     const std::size_t lost = Pos(window, "case SDL_EVENT_WINDOW_FOCUS_LOST:");
     CHECK(Pos(window, "g_gamescope_touch.Release();", lost) < Pos(window, "case SDL_EVENT_WINDOW_FOCUS_GAINED:", lost));
     CHECK(Pos(window, "ClaimGamescopeTouch();", Pos(window, "case SDL_EVENT_WINDOW_FOCUS_GAINED:")) <
           Pos(window, "break;", Pos(window, "case SDL_EVENT_WINDOW_FOCUS_GAINED:")));
-    CHECK(Contains(window, "if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0) {\n        g_gamescope_touch.Maintain("));
+
+    // The mode is reasserted on a timer only while the window has input focus.
+    CHECK(Contains(window, "if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0 &&\n"
+                           "        g_gamescope_touch.Maintain(SDL_GetTicks())) {\n"
+                           "        LogTouchRoute(DCP_TOUCH_ROUTE_REASSERT);"));
+    CHECK(Contains(window, "LogTouchRoute(DCP_TOUCH_ROUTE_CLAIMED);") &&
+          Contains(window, "LogTouchRoute(DCP_TOUCH_ROUTE_CLAIM_FAILED);"));
 
     // Only the environment decides; the route telemetry uses SDL's real driver, not the session variable.
     CHECK(Contains(window, "return dcp_touch_gamescope_wanted(&env) != 0;") && !Contains(window, "GAMESCOPE_WAYLAND_DISPLAY"));
-    CHECK(Contains(window, "SDL_GetCurrentVideoDriver(), DcpPresent::GamescopeSession()"));
+    CHECK(Contains(window, "SDL_GetCurrentVideoDriver(),") && Contains(window, "g_gamescope_touch.Roots(),") &&
+          Contains(window, "g_gamescope_touch.CompositorRoot()"));
     CHECK(!Contains(window, "XDG_SESSION_TYPE"));
     const std::size_t down = Pos(window, "LogTouchRoute(DCP_TOUCH_ROUTE_UPDATED);\n        dcp_touch_telemetry_record(DCP_TOUCH_EVENT_DETECTED);");
     CHECK(down != std::string::npos);
@@ -644,8 +854,18 @@ void TestWindowSource() {
         CHECK(!Contains(body, forbidden));
     }
 
-    // The X side is Linux only, loads libX11 on demand and names no device.
+    // The X side is Linux only, loads libX11 on demand, discovers local displays and names no device or path in a log.
     CHECK(Contains(header, "#ifdef __linux__") && Contains(header, "SDL_LoadObject(\"libX11.so.6\")"));
+    // A library without every symbol is dropped, so a later claim never calls through a null one.
+    CHECK(Contains(header, "        SDL_UnloadObject(library_);\n        library_ = nullptr;\n        return false;"));
+    CHECK(Contains(header, "/tmp/.X11-unix") && Contains(header, "S_ISSOCK") && Contains(header, "getuid()"));
+    CHECK(Contains(header, "DCP_GAMESCOPE_TOUCH_MARKER_ATOM"));
+    for (const char* shell : {"xprop", "system(", "popen(", "fork(", "execl", "/dev/input"}) {
+        CHECK(!Contains(header, shell));
+        CHECK(!Contains(policy, shell));
+    }
+    // No display number is assumed: the game's DISPLAY and the sockets found locally are the only candidates.
+    CHECK(!Contains(header, "\":0\"") && !Contains(header, "\":1\""));
     for (const std::string* text : {&header, &policy}) {
         for (const char* name : {"Ally", "Xbox", "Steam Deck", "Legion", "ROG", "28de"}) {
             CHECK(!Contains(*text, name));
@@ -664,6 +884,44 @@ void TestWindowSource() {
     CHECK(Contains(gate, " dcp-touchscreen-steamos-tests "));
     const std::string build = ReadSource("tools/build.sh");
     CHECK(Contains(build, "\"$build_dir/bin/dcp-touchscreen-steamos-tests\"") && Contains(build, " dcp-touchscreen-steamos-tests "));
+}
+
+// DCP-Y9F9QZ: the supplied report log, modelled exactly. Gamescope was effectively in Left mode, so the touch was a
+// pointer move and a left click and no finger event ever reached SDL, while the route line still looked healthy.
+void TestFailingReportLogIsDistinguishable() {
+    DcpTouchRouteLog log{};
+    const DcpTouchRouteInfo route{"x11", 1, 1, 0, 0, DCP_TOUCH_CLAIM_NO_DISPLAY};
+
+    Window w;
+    Route(log, DCP_TOUCH_ROUTE_READY, route); // direct_devices=1: the touchscreen exists and SDL lists it
+    Tap(w, GamescopeMode::Left);
+    const std::uint32_t seen = TapButtons(w);
+
+    CHECK(w.HostCursorOwnedByMouse()); // pointer_motion_active source=mouse
+    CHECK((seen & BTN_SQUARE) != 0);   // pointer_motion_while_button_held source=mouse -> Square
+    CHECK(w.lines.empty());            // no touchscreen_detected, no touchpad_used, no suppression
+    CHECK((seen & BTN_TOUCHPAD) == 0);
+
+    // The same route line after the fix: the finger events arrive, so the same session is distinguishable.
+    Window fixed;
+    Route(log, DCP_TOUCH_ROUTE_CLAIMED, DcpTouchRouteInfo{"x11", 1, 1, 2, 1, DCP_TOUCH_CLAIM_NO_X11});
+    Tap(fixed, GamescopeMode::Passthrough);
+    const std::uint32_t fixed_seen = TapButtons(fixed);
+    CHECK(!fixed.HostCursorOwnedByMouse());
+    CHECK((fixed_seen & BTN_TOUCHPAD) != 0 && (fixed_seen & BTN_SQUARE) == 0);
+    CHECK(fixed.lines.size() == 2 && Contains(fixed.lines[0], "event=touchscreen_detected") &&
+          Contains(fixed.lines[1], "event=touchscreen_synthetic_mouse_suppressed"));
+}
+
+void TestReassertStaysBounded() {
+    DcpTouchRouteLog log{};
+    const DcpTouchRouteInfo both{"x11", 1, 1, 2, 1, DCP_TOUCH_CLAIM_NO_X11};
+    Route(log, DCP_TOUCH_ROUTE_CLAIMED, both);
+    std::size_t lines = 0;
+    for (int i = 0; i < 1000; ++i) {
+        lines += Route(log, DCP_TOUCH_ROUTE_REASSERT, both).size();
+    }
+    CHECK(lines == 4); // 1, 10, 100, 1000
 }
 
 void TestDocs() {
@@ -688,10 +946,18 @@ int main() {
     TestCoordinates();
     TestGamescopePolicy();
     TestModeOwnership();
+    TestCompetingWriteOnAnotherRootIsReasserted();
+    TestStalePassthroughRootIsRewritten();
+    TestBothRootsStartLeft();
+    TestOneRootUnavailable();
+    TestNoRootAvailable();
+    TestFocusReleaseAndRegain();
     TestVideoBackendDecision();
     TestRouteTelemetry();
     TestTelemetryStaysBounded();
+    TestReassertStaysBounded();
     TestWindowSource();
+    TestFailingReportLogIsDistinguishable();
     TestDocs();
     std::printf("touchscreen steamos tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

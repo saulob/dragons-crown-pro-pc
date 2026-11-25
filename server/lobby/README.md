@@ -248,7 +248,7 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
 | Table | Row | Columns |
 |---|---|---|
 | `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` and the six platform room counters below |
-| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
+| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `difficulty` (`normal`, `hard`, `infernal`, `ultimate`) counts ended rooms with a guest once each by the difficulty the host reported at `room.create` (raw 1 and 2 are `hard`, 3 and 4 `infernal`, 99 `ultimate`; a missing or unknown value adds no row, so the dashboard's unknown is the rooms with a guest minus these); `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
 - Days are America/Sao_Paulo calendar days (`YYYY-MM-DD`); samples are UTC timestamps.
@@ -363,6 +363,47 @@ to a menu button at the top right (Dashboard session, Sign out); **Sign out** cl
 stored in `localStorage` or a cookie. Every `/admin` answer is `no-store`
 with a restrictive Content-Security-Policy (own script and style only, no inline code, no framing), `nosniff` and
 `no-referrer`, and no CORS headers.
+
+**Public statistics**: `GET /stats` (no token) is what the launcher's Home page reads (docs/LAUNCHER.md, Home). It returns only
+anonymous totals, with the dashboard's own technical names, from the same state and formulas as the dashboard. The launcher
+chooses the wording players see.
+
+```json
+{ "generated": "2026-11-23T03:00:00.000Z",
+  "live": { "online": 14, "lobby": 7, "in_rooms": 5, "open_rooms": 3, "peak_today": 22 },
+  "today": { "sessions": 23, "rooms_created": 44, "joins": 19 },
+  "last_30_days": { "rooms_created": 10860, "successful_joins": 4060, "parties_reported": 2364, "average_party_size": 2.24,
+                    "rooms_with_guest": 1961, "classes": [{ "class": "Sorceress", "count": 1397 }] },
+  "lifetime": { "sessions": 11349, "players": 3842, "since": "2026-09-01" } }
+```
+
+| Field | Dashboard value |
+|---|---|
+| `live.online`, `live.in_rooms`, `live.open_rooms` | Online now, In rooms, Open rooms |
+| `live.lobby` | Players listed in the public Lobby |
+| `live.peak_today` | Peak today (`today.peak_online`, raised by the live count) |
+| `today.sessions`, `today.rooms_created`, `today.joins` | Sessions today, Rooms today, Joins today (not unique players) |
+| `last_30_days.rooms_created`, `successful_joins`, `parties_reported`, `average_party_size` | History for 30 days |
+| `last_30_days.rooms_with_guest` | Rooms with a guest: rooms that ended with at least one guest |
+| `lifetime.sessions` | Sessions summed over every retained day of `metrics_daily` (never pruned): the same Sessions as the dashboard, reconnect window included |
+| `lifetime.since` | First day with a recorded session: where the total starts, and the only date it can claim to cover |
+| `lifetime.players` | Distinct accounts (rows of `accounts`, never deleted), one per account however many sessions; includes accounts that only ran the Connection test |
+| `last_30_days.classes` | Characters in parties, most played first; class appearances in reported parties, not players |
+
+- `lifetime` is additive and always optional: it has no core field, a missing or unreadable value is `null`, and it can
+  never fail the answer. The object keeps a complete lifetime answer and a complete 30 day answer for 10 minutes, and the Worker keeps the last good
+  lifetime values for an hour.
+- Within a section the core fields (`online`, `lobby`, `open_rooms`; `rooms_created`; the three 30-day counts) must be valid
+  or the section is `null`. The newer fields (`in_rooms`, `peak_today`, `sessions`, `joins`, `rooms_with_guest`, `classes`)
+  are `null` when they cannot be read and never take the rest down; an answer that has only the core fields is still served.
+- The 30 days are today and the 29 days before it, America/Sao_Paulo days. Nothing about a player, account, address, room,
+  platform, version or country is in it, and reading it creates no session, presence or row. Only GET and HEAD are
+  accepted (405 otherwise); `/admin` is unchanged.
+- Each Worker isolate asks the object at most every 30 seconds (every 5 seconds after a core section failed) and keeps
+  the last good value of every field: 3 minutes for the live and today fields, 30 minutes for the 30-day ones. A value
+  that cannot be refreshed keeps its last good one until then, then becomes `null`. When no section is available the
+  answer is `503 {"error":"unavailable"}` (`no-store`); a complete answer is `Cache-Control: public, max-age=30`, a
+  partial one `no-store`. The object is reached by a stub call, never by an HTTP request to the public address.
 
 ```
 curl -H "Authorization: Bearer <token>" https://dcp-lobby.<subdomain>.workers.dev/admin/api/summary

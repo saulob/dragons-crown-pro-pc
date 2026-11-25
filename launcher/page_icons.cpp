@@ -22,12 +22,13 @@ extern const TranslationFile kPageIconFiles[];
 namespace {
 
 constexpr PageIconAsset kAssets[] = {
-    {PageId::kPlay, "play.svg", 0.84f},         {PageId::kDisplay, "display.svg", 0.90f},
+    {PageId::kHome, "home.svg", 0.88f},         {PageId::kPlay, "play.svg", 0.84f},
+    {PageId::kDisplay, "display.svg", 0.90f},
     {PageId::kGraphics, "graphics.svg", 0.84f}, {PageId::kGameplay, "gameplay.svg", 0.92f},
     {PageId::kOnline, "online.svg", 0.90f},     {PageId::kCheats, "cheats.svg", 0.92f},
     {PageId::kControls, "controls.svg", 0.94f}, {PageId::kTrophies, "trophies.svg", 0.86f},
-    {PageId::kEditor, "editor.svg", 0.90f},     {PageId::kBugReport, "bug-report.svg", 0.90f},
-    {PageId::kAbout, "about.svg", 0.88f},
+    {PageId::kSave, "save.svg", 0.84f},         {PageId::kEditor, "editor.svg", 0.90f},
+    {PageId::kBugReport, "bug-report.svg", 0.90f}, {PageId::kAbout, "about.svg", 0.88f},
 };
 
 struct Bounds {
@@ -94,17 +95,18 @@ std::vector<uint8_t> RasterizeIcon(const uint8_t* svg, size_t size, float optica
     return rgba;
 }
 
-std::vector<uint8_t> RenderPageIcon(PageId page, int pixels) {
-    const PageIconAsset* asset = FindPageIcon(page);
-    if (!asset) {
-        return {};
-    }
+std::vector<uint8_t> RenderFileIcon(const FileIconAsset& asset, int pixels) {
     for (const TranslationFile* file = kPageIconFiles; file->name; ++file) {
-        if (std::strcmp(file->name, asset->file) == 0) {
-            return RasterizeIcon(file->data, file->size, asset->optical_scale, pixels);
+        if (std::strcmp(file->name, asset.file) == 0) {
+            return RasterizeIcon(file->data, file->size, asset.optical_scale, pixels);
         }
     }
     return {};
+}
+
+std::vector<uint8_t> RenderPageIcon(PageId page, int pixels) {
+    const PageIconAsset* asset = FindPageIcon(page);
+    return asset ? RenderFileIcon({asset->file, asset->optical_scale}, pixels) : std::vector<uint8_t>{};
 }
 
 } // namespace dcp

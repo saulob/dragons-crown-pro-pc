@@ -19,6 +19,12 @@
 namespace dcp {
 
 class CpkArchive;
+struct Mbs;
+
+// The layers of a lost-weapon model that form its picture: one copy of the weapon, without trail or ghosts.
+std::vector<uint32_t> ItemPictureLayers(const Mbs& mbs);
+// The layers of a UseItem00 animation that are the item itself, on the icon atlas.
+std::vector<uint32_t> UseItemIconLayers(const Mbs& mbs, size_t animation);
 
 // SystemMsg record of a class's colour preset name (Fighter 871 "Sterling Silver" ... Wizard 900), or -1.
 int NativeColorMessage(CharacterClass klass, int color);
@@ -59,6 +65,17 @@ public:
     // The native preset name from the SystemMsg sheet of language `suffix` (msgsheet/SystemMsg_<suffix>.fms), falling back
     // to the unsuffixed and US sheets; empty when no sheet has it or the colour is outside 0..4.
     std::string ColorName(CharacterClass klass, int color, const std::string& suffix);
+    // The records of msgsheet/<sheet>_<suffix>.fms with the same fallbacks; empty when no archive has the sheet.
+    const std::vector<std::string>& Sheet(const std::string& sheet, const std::string& suffix);
+
+    // The cropped images of the animations of stage/<stage>.mbs (Menu or Interface); a name the game files do not have is
+    // left out.
+    std::map<std::string, SpriteImage> StageIcons(const std::string& stage, const std::vector<std::string>& animations);
+    std::map<std::string, SpriteImage> MenuIcons(const std::vector<std::string>& animations) { return StageIcons("Menu", animations); }
+    // A weapon's picture from its lost-weapon object: `model` drawn over `atlas`, cropped; nothing when unreadable.
+    std::optional<SpriteImage> ItemPicture(const std::string& model, const std::string& atlas);
+    // The inventory icons of animations of player/UseItem00.mbs, without the glow the pickup animation draws around them.
+    std::map<std::string, SpriteImage> UseItemIcons(const std::vector<std::string>& animations);
 
     const std::string& error() const { return error_; }
     const CharacterArtSources& sources() const { return sources_; }
@@ -91,7 +108,6 @@ private:
         CustomLook look;
         SpriteImage image;
     };
-    const std::vector<std::string>& Messages(const std::string& suffix);
 
     CharacterArtSources sources_;
     std::vector<std::unique_ptr<CpkArchive>> archives_;
@@ -102,7 +118,7 @@ private:
     std::optional<Figure> figure_;
     std::map<CharacterClass, std::optional<std::vector<RegionMap>>> regions_;
     std::optional<CustomRender> custom_;
-    std::map<std::string, std::vector<std::string>> system_messages_;
+    std::map<std::string, std::vector<std::string>> sheets_;
     std::string error_;
 };
 

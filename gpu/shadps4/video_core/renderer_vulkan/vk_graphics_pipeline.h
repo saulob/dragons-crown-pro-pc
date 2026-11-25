@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -123,6 +124,12 @@ public:
         return *square_pipeline;
     }
 
+    /// dcp: Character Highlight mask variant, created on first use; null when it cannot be built.
+    vk::Pipeline HighlightMaskPipeline() const;
+    bool HighlightMaskUsesDepth() const noexcept {
+        return key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid && key.num_samples == 1;
+    }
+
     /// Gets the attributes and bindings for vertex inputs.
     template <typename Attribute, typename Binding>
     void GetVertexInputs(VertexInputs<Attribute>& attributes, VertexInputs<Binding>& bindings,
@@ -132,11 +139,23 @@ public:
 
 private:
     void BuildDescSetLayout(bool preloading);
+    bool CreateHighlightMaskPipeline() const;
 
 private:
     GraphicsPipelineKey key;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
     vk::UniquePipeline square_pipeline;
+    std::array<vk::ShaderModule, MaxShaderStages> shader_modules{};
+    vk::ShaderModule mask_tcs_module{};
+    vk::ShaderModule mask_tes_module{};
+    vk::ShaderModule mask_fragment_module{};
+    VertexInputs<vk::VertexInputAttributeDescription> mask_vertex_attributes;
+    VertexInputs<vk::VertexInputBindingDescription> mask_vertex_bindings;
+    VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT> mask_vertex_divisors;
+    bool mask_has_vertex_bindings{};
+    mutable vk::Pipeline mask_pipeline{};
+    mutable bool mask_pipeline_failed{};
+    mutable std::mutex mask_pipeline_mutex;
 };
 
 struct ClipDistanceShaderKey {

@@ -34,8 +34,8 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 8u; // dcp: interpolated integer fix by capability
-static constexpr u32 ShaderMetaVersion = 7u; // dcp: ImageResource::needs_native
-static constexpr u32 PipelineKeyVersion = 5u; // dcp: Info layout (ImageResource::needs_native)
+static constexpr u32 ShaderMetaVersion = 8u; // dcp: InfoPersistent::interp_summary
+static constexpr u32 PipelineKeyVersion = 6u; // dcp: InfoPersistent::interp_summary
 } // namespace Serialization
 
 namespace Vulkan {

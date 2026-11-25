@@ -67,6 +67,9 @@ void dcp_mouse_controller_touch(DcpMouseState *state);
  * again, recentred, once both are free. */
 void dcp_mouse_controller_surface(DcpMouseState *state, int touching);
 void dcp_mouse_screen_surface(DcpMouseState *state, int touching);
+/* Right stick deflected outside deadzone: in Always On / trackpad fallback, lifts an idle synthetic finger immediately
+ * so the game's right-stick pointer path is not suppressed by a stationary touch contact. */
+void dcp_mouse_controller_stick(DcpMouseState *state, int active);
 int dcp_mouse_pointer_active(DcpMouseState *state);
 /* Whether the window should hold the mouse in relative mode (the OS cursor hidden and unbounded), before the window's own
  * blocking: Hold while the pointer is active, Always On as long as Mouse Controls is on, even while a controller touch has

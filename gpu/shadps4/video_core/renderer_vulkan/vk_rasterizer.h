@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include "character_highlight_draw.h"
 #include "common/recursive_lock.h"
+#include "dcp_issue84_diag.h"
 #include "dcp_narrow_water_reader.h"
 #include "dcp_water_diag.h"
 #include "common/shared_first_mutex.h"
@@ -12,9 +14,11 @@
 #include "video_core/renderer_backend.h"
 #include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
+#include "video_core/renderer_vulkan/vk_feedback_snapshot.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
+#include "video_core/renderer_vulkan/vk_highlight_mask.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -158,6 +162,7 @@ private:
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
     void CaptureWaterDiagLayouts(const GraphicsPipeline* pipeline);
     void ReportWaterDiag(const GraphicsPipeline* pipeline);
+    void ReportIssue84Diag(const GraphicsPipeline* pipeline, bool is_indexed, u32 vertex_count);
     bool SkipsNarrowWaterReader(const GraphicsPipeline* pipeline);
     /// dcp: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
@@ -191,6 +196,13 @@ private:
     void EliminateFastClear();
 
     void UpdateDynamicState(const GraphicsPipeline* pipeline, bool is_indexed) const;
+    int HighlightSlotForDraw() const;
+    bool HighlightContinuesEarly(const GraphicsPipeline* pipeline) const;
+    bool HighlightGroupContinues(int slot) const;
+    void StartHighlightGroup(int slot, const GraphicsPipeline* pipeline, const RenderState& state);
+    void RecordHighlightMask(const GraphicsPipeline* pipeline, bool is_indexed, u32 num_indices,
+                             u32 num_instances, u32 first_vertex, u32 first_instance);
+    void FlushHighlightOutline();
     void UpdateViewportScissorState() const;
     void UpdateDepthStencilState() const;
     /// dcp: the squaring pipeline of a scaled MIN/MAX blend when this draw can use it.
@@ -321,6 +333,7 @@ private:
     PipelineCache pipeline_cache;
     std::unique_ptr<DrawPreparation> draw_prep;
     std::unique_ptr<SceneTargets> scene_targets;
+    std::unique_ptr<FeedbackSnapshots> feedback_snapshots;
     bool scene_started = false;
     std::array<float, 2> target_scale{1.0f, 1.0f}; ///< pass drawn into scaled scene targets
     const bool host_markers_enabled;
@@ -343,6 +356,24 @@ private:
     u32 set_write_index{};
     Pipeline::DescriptorWrites set_writes;
     Shader::PushData push_data;
+
+    struct HighlightGroup {
+        bool active = false;
+        int slot = -1;
+        VideoCore::ImageId color{};
+        VideoCore::ImageId depth{};
+        RenderState target{};
+        vk::Format color_format = vk::Format::eUndefined;
+        vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
+        std::array<uint32_t, 4> color_swizzle = dcp::highlight::kIdentityColorSwizzle;
+        VAddr color_address{};
+        VAddr depth_address{};
+        VAddr atlas_address{};
+        CharacterHighlightMask::Extent* mask = nullptr;
+        bool clear_mask = true;
+    } highlight;
+    unsigned highlight_announced{};
+    CharacterHighlightMask highlight_mask;
 
     // dcp: bindings point at their description instead of copying it (a hot spot): into
     // image_desc_cache for memoized lookups (pinned for the current BindTextures call), else
@@ -460,6 +491,11 @@ private:
     DcpWaterDiag::Monitor water_diag;
     /// Layouts of the sampled targets once the textures were bound (cb, then depth).
     std::array<u32, AmdGpu::NUM_COLOR_BUFFERS + 1> water_diag_layouts{};
+    DcpIssue84Diag::Monitor issue84_diag;
+    bool issue84_snapshot_used{};
+    u32 issue84_sample_layout{};
+    bool has_active_provoking_last{};
+    bool active_provoking_last{};
     // dcp: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).
     static inline thread_local const AmdGpu::Regs* stage_regs = nullptr;

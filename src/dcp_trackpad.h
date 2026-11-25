@@ -82,6 +82,8 @@ typedef enum {
     DCP_TRACKPAD_EVENT_MOUSE_FALLBACK_USED,
     DCP_TRACKPAD_EVENT_POINTER_INTERACTION,
     DCP_TRACKPAD_EVENT_UNAVAILABLE,
+    DCP_TRACKPAD_EVENT_SYNTHETIC_TOUCH_ACTIVE,
+    DCP_TRACKPAD_EVENT_YIELDED_TO_STICK,
     DCP_TRACKPAD_EVENT_COUNT
 } DcpTrackpadEvent;
 
@@ -117,6 +119,7 @@ static inline int dcp_trackpad_note(DcpTrackpadLog *log, DcpTrackpadEvent event,
     if (!dcp_trackpad_count_due(count)) return 0;
     static const char *const names[DCP_TRACKPAD_EVENT_COUNT] = {
         "trackpad_native_used", "trackpad_mouse_fallback_used", "trackpad_pointer_interaction", "trackpad_unavailable",
+        "trackpad_synthetic_touch_active", "trackpad_yielded_to_stick",
     };
     if (event == DCP_TRACKPAD_EVENT_UNAVAILABLE) {
         snprintf(line, size, "Trackpad telemetry: event=%s reason=%s count=%llu", names[event], dcp_trackpad_reason_name(reason),

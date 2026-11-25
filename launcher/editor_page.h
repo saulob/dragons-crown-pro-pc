@@ -4,6 +4,7 @@
 #include <imgui.h>
 
 #include <filesystem>
+#include <future>
 #include <functional>
 #include <map>
 #include <optional>
@@ -16,9 +17,14 @@
 #include "appearance_loader.h"
 #include "character_art.h"
 #include "editor_model.h"
+#include "hp_override.h"
+#include "inventory_data.h"
+#include "inventory_model.h"
+#include "item_catalog.h"
 #include "save_data.h"
 #include "save_discovery.h"
 #include "save_edit.h"
+#include "save_page_model.h"
 
 namespace trg {
 class Ui;
@@ -28,6 +34,10 @@ namespace dcp {
 
 class LauncherHost;
 
+enum class ButtonIcon { kAppearance, kInventory, kBack };
+bool IconButton(const char* label, const std::function<ImTextureID(int pixels)>& icon, ImVec2 size);
+void DrawItemPlaceholder(ImDrawList* draw, ImVec2 min, float size, ItemCategory category, ImU32 color);
+
 struct EditorGame {
     GameRoots roots;
     const GameBuild* configured = nullptr;
@@ -36,13 +46,17 @@ struct EditorGame {
 class EditorPage {
 public:
     // `game` says where the builds are and which one the launcher runs; `message_suffix` names the SystemMsg language
-    // the game uses (msgsheet/SystemMsg_<suffix>.fms).
+    // the game uses (msgsheet/SystemMsg_<suffix>.fms). `selection` is the save the Save page chose; when that page
+    // replaces a save, the Editor reloads before it can write again.
     EditorPage(LauncherHost& host, std::filesystem::path user_dir, std::function<EditorGame()> game,
-               std::function<std::string()> message_suffix);
+               std::function<std::string()> message_suffix, const SaveSelection* selection = nullptr);
 
     void Refresh();
 
-    bool dirty() const { return (edit_ && edit_->dirty()) || !(custom_working_ == custom_saved_); }
+    bool dirty() const {
+        return (edit_ && edit_->dirty()) || !(custom_working_ == custom_saved_) ||
+               !(override_working_ == override_saved_);
+    }
     // A reason Play/Quit must wait (empty when clean), for the launcher gate.
     std::string DirtyReason() const;
 
@@ -58,7 +72,6 @@ private:
 
     const EditorBuild* SelectedBuild() const;
     std::vector<size_t> VisibleSaves() const;
-    int FirstSaveOf(const std::vector<size_t>& visible) const;
     void UseArtOf(const EditorBuild* build);
 
     const DiscoveredSave* SelectedSave() const;
@@ -88,11 +101,12 @@ private:
     void DrawIdentity(trg::Ui& ui, ImVec2 at, const CharacterIdentity& identity, float row_height);
     std::optional<PixelBox> PreviewCrop(CharacterClass klass, int color);
     void DrawBaseColor(trg::Ui& ui, const CharacterView& character, CustomLook look);
+    void DrawDifficulty(trg::Ui& ui, const CharacterView& character, bool changed);
     void DrawCustom(trg::Ui& ui, const CharacterView& character, CustomLook look);
     void DrawAllColorsRandom(trg::Ui& ui, CharacterClass klass, CustomLook look);
     void DrawResetCustom(trg::Ui& ui, CustomLook look);
 
-    bool TitleWithButton(trg::Ui& ui, const char* title, const char* button);
+    bool TitleWithButton(trg::Ui& ui, const char* title, const char* button, ButtonIcon icon);
     void RequestAppearance();
     void DrawAppearanceLoading(trg::Ui& ui);
     void AdvanceAppearanceLoad();
@@ -105,15 +119,35 @@ private:
     void DrawCharacter(trg::Ui& ui);
     void DrawCharacterList(trg::Ui& ui);
     void DrawCharacterEditor(trg::Ui& ui);
-    bool NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed,
-                       FieldStyle style);
+    bool NumberControl(trg::Ui& ui, const char* id, int* value, NumberRange range, float drag_speed, FieldStyle style,
+                       bool positional_marker = false);
     void DrawAppearance(trg::Ui& ui);
+    void DrawInventory(trg::Ui& ui);
+    void DrawInventorySummary(trg::Ui& ui, const CharacterView& character, const CharacterView* saved);
+    void DrawInventoryList(trg::Ui& ui, const InventoryList& list, float width, float height);
+    void DrawInventoryDetail(trg::Ui& ui, float width, float height);
+    void DrawItemFields(trg::Ui& ui, const ItemDetail& detail);
+    void DrawItemModifiers(trg::Ui& ui, const ItemDetail& detail);
+    ImTextureID ButtonIconTexture(ButtonIcon icon, int pixels);
+    bool DrawGameImage(ImDrawList* draw, const SpriteImage* image, ImTextureID& texture, ImVec2 min, float size, ImU32 tint);
+    void DrawRank(trg::Ui& ui, char letter);
+    void DrawItemIcon(ImDrawList* draw, ImVec2 min, float size, uint32_t definition, ItemCategory category, ImU32 fallback);
+    void RequestInventory();
+    void ResetInventoryView();
+    const ItemCatalog& Catalog() const;
+    bool CatalogReady();
     void DrawSwitchPrompt(trg::Ui& ui);
+    void KeepSearchMatchingSavedItem();
+    void ItemField(trg::Ui& ui, const ItemRef& ref, const std::string& key, NumberRange range, float drag_speed, bool changed);
+    bool PrepareInventorySave(trg::Ui& ui);
+    const char* InventoryProblemText(const std::string& problem) const;
 
     LauncherHost& host_;
     std::filesystem::path user_dir_;
     std::function<EditorGame()> game_;
     std::function<std::string()> message_suffix_;
+    const SaveSelection* selection_ = nullptr;
+    uint64_t seen_generation_ = 0;
 
     EditorGame current_game_;
     std::vector<EditorBuild> builds_;
@@ -128,8 +162,18 @@ private:
     int selected_slot_ = 0;
     int selected_character_ = -1;
     CharacterNav nav_;
-    ImGuiID editing_number_ = 0;
+    TypedNumberEdit typed_;
+    TypedFieldEdit typing_;
+    bool typed_finished_ = false;
+    std::vector<VisibleField> visible_;
+    int visible_frame_ = -100;
+    bool typing_now_ = false;
+    std::optional<ItemRef> typed_item_;
     bool focus_number_ = false;
+    ImGuiID drag_id_ = 0;
+    float drag_press_x_ = 0.0f;
+    bool drag_started_ = false;
+    ImGuiID press_id_ = 0;
     int press_value_ = 0;
     char number_buffer_[16] = {};
 
@@ -137,6 +181,8 @@ private:
     CustomStore custom_saved_;
     CustomStore custom_working_;
     std::string custom_error_;
+    CharacterOverrideStore override_saved_;
+    CharacterOverrideStore override_working_;
     std::string selected_part_;
     bool confirm_reset_custom_ = false;
     std::mt19937 random_{std::random_device{}()};
@@ -168,6 +214,21 @@ private:
     };
     std::optional<AppearanceJob> appearance_job_;
     bool appearance_failed_ = false;
+
+    InventorySelection inventory_selection_;
+    InventoryQuery inventory_query_;
+    int fine_anchor_value_ = 0;
+    float fine_anchor_x_ = 0.0f;
+    bool fine_drag_ = false;
+    char inventory_search_[96] = {};
+    ItemCatalog catalog_;
+    std::string catalog_key_;
+    std::future<ItemAssets> catalog_job_;
+    ItemIconSet icons_;
+    std::map<int, ImTextureID> icon_textures_; // by ItemIconSet::PictureKey
+    std::map<std::pair<ButtonIcon, int>, ImTextureID> button_icons_;
+    std::map<char, ImTextureID> rank_textures_;
+    std::string catalog_job_key_;
 
     PendingSwitch pending_switch_ = PendingSwitch::kNone;
     int pending_target_ = 0;

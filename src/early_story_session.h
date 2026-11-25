@@ -68,6 +68,13 @@ void early_story_note_own_step(int step);
 int early_story_own_step(void);
 typedef void (*EarlyStoryStepObserver)(int step);
 void early_story_session_observe_own_step(EarlyStoryStepObserver observer);
+/* The lead character's difficulty byte (player is 1-based) as the selector last saw it; 1 when it differs from the last one
+ * noted, so the caller logs each change once. */
+int early_story_note_own_difficulty(int player, int raw);
+/* The raw byte, or EARLY_STORY_NO_DIFFICULTY before any. */
+#define EARLY_STORY_NO_DIFFICULTY (-1)
+int early_story_own_difficulty(void);
+int early_story_own_player(void);
 /* The host's step from the game's replicated host record, read at stage setup. */
 void early_story_note_host_step(int step);
 /* A seated guest of a story room got the owner's live state (EARLY_STORY_STATE_ATTR). Updates arrive in the order the

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <set>
 
 #include "cpk_patch.h"
 #include "fms_sheet.h"
@@ -15,6 +16,30 @@ namespace {
 
 constexpr float kPortraitScale = 2.0f;
 constexpr float kPreviewScale = 2.0f;
+constexpr float kItemPictureScale = 1.0f;
+constexpr float kUseItemIconScale = 2.0f;
+constexpr uint8_t kUseItemIconTexture = 1; // texture 0 of UseItem00 holds the glow
+
+std::optional<SpriteImage> CropToContent(const SpriteImage& image) {
+    int x0 = image.width, y0 = image.height, x1 = 0, y1 = 0;
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            if (image.rgba[(size_t(y) * size_t(image.width) + size_t(x)) * 4 + 3] < 8) continue;
+            x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x + 1), y1 = std::max(y1, y + 1);
+        }
+    }
+    if (x1 <= x0 || y1 <= y0) return std::nullopt;
+    SpriteImage cropped;
+    cropped.width = x1 - x0;
+    cropped.height = y1 - y0;
+    cropped.scale = image.scale;
+    cropped.rgba.resize(size_t(cropped.width) * size_t(cropped.height) * 4);
+    for (int y = 0; y < cropped.height; ++y) {
+        std::copy_n(image.rgba.begin() + (size_t(y + y0) * size_t(image.width) + size_t(x0)) * 4, size_t(cropped.width) * 4,
+                    cropped.rgba.begin() + size_t(y) * size_t(cropped.width) * 4);
+    }
+    return cropped;
+}
 
 std::string_view UpperName(CharacterClass klass) {
     switch (klass) {
@@ -144,6 +169,113 @@ bool CharacterArt::LoadPortraits() {
         portraits_[klass] = RenderSprite(request);
     }
     return true;
+}
+
+std::map<std::string, SpriteImage> CharacterArt::StageIcons(const std::string& stage, const std::vector<std::string>& animations) {
+    std::map<std::string, SpriteImage> icons;
+    std::string why;
+    const std::optional<Mbs> mbs = ParseMbs(Read("stage/" + stage + ".mbs"), &why);
+    if (!mbs) return icons;
+    std::vector<uint8_t> pack = Read("stage/" + stage + ".ftx");
+    if (pack.empty()) return icons;
+    std::map<uint8_t, FtxSurface> surfaces;
+    for (const std::string& name : animations) {
+        const std::optional<size_t> animation = FindAnimation(*mbs, name);
+        if (!animation) continue;
+        SpriteRequest request;
+        request.mbs = &*mbs;
+        request.animation = *animation;
+        request.scale = 1.0f;
+        bool complete = true;
+        for (const uint32_t layer : FrameLayers(*mbs, *animation, 0)) {
+            const uint8_t texture = mbs->layers[layer].texture;
+            if (texture >= request.textures.size()) continue;
+            if (!surfaces.contains(texture)) {
+                std::optional<FtxSurface> surface = ReadFtxSurface(pack, texture, &why);
+                if (!surface) {
+                    complete = false;
+                    continue;
+                }
+                surfaces.emplace(texture, std::move(*surface));
+            }
+            request.textures[texture] = &surfaces.at(texture);
+        }
+        if (!complete) continue;
+        if (std::optional<SpriteImage> cropped = CropToContent(RenderSprite(request))) icons.emplace(name, std::move(*cropped));
+    }
+    return icons;
+}
+
+std::vector<uint32_t> ItemPictureLayers(const Mbs& mbs) {
+    std::vector<uint32_t> shown;
+    if (mbs.animations.empty()) return shown;
+    const MbsAnimation& animation = mbs.animations.front();
+    // Each track of the throw animation is a complete copy of the weapon; the last is drawn on top, nearest to the viewer.
+    const MbsTrack* front = nullptr;
+    for (uint8_t t = 0; t < animation.track_count; ++t) {
+        if (mbs.tracks[animation.first_track + t].frame_count) front = &mbs.tracks[animation.first_track + t];
+    }
+    if (!front) return shown;
+    const MbsKey& key = mbs.keys[mbs.frames[front->first_frame].key];
+    // Within a track the motion trail repeats the weapon's parts, fading in: only the last copy is the weapon itself.
+    for (uint32_t i = 0; i < key.layer_count; ++i) {
+        const uint32_t index = key.first_layer + i;
+        const MbsLayer& layer = mbs.layers[index];
+        bool repeated = false;
+        for (uint32_t later = i + 1; later < key.layer_count; ++later) repeated |= mbs.layers[key.first_layer + later].id == layer.id;
+        if (repeated || layer.color >= mbs.colors.size()) continue;
+        const MbsColorQuad& color = mbs.colors[layer.color];
+        const bool opaque = color.center.a == 255 ||
+                            std::any_of(color.corners.begin(), color.corners.end(), [](const MbsColor& c) { return c.a == 255; });
+        if (opaque) shown.push_back(index);
+    }
+    return shown;
+}
+
+std::vector<uint32_t> UseItemIconLayers(const Mbs& mbs, size_t animation) {
+    std::vector<uint32_t> icon;
+    for (const uint32_t layer : FrameLayers(mbs, animation, 0)) {
+        if (mbs.layers[layer].texture == kUseItemIconTexture) icon.push_back(layer);
+    }
+    return icon;
+}
+
+std::map<std::string, SpriteImage> CharacterArt::UseItemIcons(const std::vector<std::string>& animations) {
+    std::map<std::string, SpriteImage> icons;
+    const std::optional<Mbs> mbs = ParseMbs(Read("player/UseItem00.mbs"));
+    if (!mbs) return icons;
+    const std::optional<FtxSurface> surface = ReadFtxSurface(Read("player/UseItem00.ftx"), kUseItemIconTexture);
+    if (!surface) return icons;
+    for (const std::string& name : animations) {
+        const std::optional<size_t> animation = FindAnimation(*mbs, name);
+        if (!animation) continue;
+        const std::vector<uint32_t> layers = UseItemIconLayers(*mbs, *animation);
+        if (layers.empty()) continue;
+        const std::set<uint32_t> shown(layers.begin(), layers.end());
+        SpriteRequest request;
+        request.mbs = &*mbs;
+        request.animation = *animation;
+        request.scale = kUseItemIconScale;
+        request.textures[kUseItemIconTexture] = &*surface;
+        request.visible = [&](uint32_t layer) { return shown.contains(layer); };
+        if (std::optional<SpriteImage> cropped = CropToContent(RenderSprite(request))) icons.emplace(name, std::move(*cropped));
+    }
+    return icons;
+}
+
+std::optional<SpriteImage> CharacterArt::ItemPicture(const std::string& model, const std::string& atlas) {
+    const std::optional<Mbs> mbs = ParseMbs(Read(model));
+    if (!mbs || mbs->animations.empty()) return std::nullopt;
+    std::optional<FtxSurface> surface = ReadFtxSurface(Read(atlas), 0);
+    if (!surface) return std::nullopt;
+    const std::vector<uint32_t> layers = ItemPictureLayers(*mbs);
+    const std::set<uint32_t> shown(layers.begin(), layers.end());
+    SpriteRequest request;
+    request.mbs = &*mbs;
+    request.scale = kItemPictureScale;
+    request.textures.fill(&*surface);
+    request.visible = [&](uint32_t layer) { return shown.contains(layer); };
+    return CropToContent(RenderSprite(request));
 }
 
 const SpriteImage* CharacterArt::Portrait(CharacterClass klass) {
@@ -369,20 +501,21 @@ void CharacterArt::Adopt(CharacterArt&& prepared, CharacterClass klass) {
     }
 }
 
-const std::vector<std::string>& CharacterArt::Messages(const std::string& suffix) {
-    const auto cached = system_messages_.find(suffix);
-    if (cached != system_messages_.end()) return cached->second;
+const std::vector<std::string>& CharacterArt::Sheet(const std::string& sheet, const std::string& suffix) {
+    const std::string key = sheet + "_" + suffix;
+    const auto cached = sheets_.find(key);
+    if (cached != sheets_.end()) return cached->second;
     OpenArchives();
-    std::vector<std::string>& records = system_messages_[suffix];
+    std::vector<std::string>& records = sheets_[key];
     std::vector<std::string> entries;
-    if (!suffix.empty()) entries.push_back("msgsheet/SystemMsg_" + suffix + ".fms");
-    entries.emplace_back("msgsheet/SystemMsg.fms");
-    entries.emplace_back("msgsheet/SystemMsg_US.fms");
+    if (!suffix.empty()) entries.push_back("msgsheet/" + sheet + "_" + suffix + ".fms");
+    entries.push_back("msgsheet/" + sheet + ".fms");
+    entries.push_back("msgsheet/" + sheet + "_US.fms");
     for (const std::string& entry : entries) {
         for (const auto& archive : archives_) {
             if (const CpkEntry* found = archive->Find(entry)) {
-                if (const std::optional<FmsSheet> sheet = ParseFms(archive->Read(*found))) {
-                    records = sheet->records;
+                if (const std::optional<FmsSheet> parsed = ParseFms(archive->Read(*found))) {
+                    records = parsed->records;
                     return records;
                 }
             }
@@ -394,7 +527,7 @@ const std::vector<std::string>& CharacterArt::Messages(const std::string& suffix
 std::string CharacterArt::ColorName(CharacterClass klass, int color, const std::string& suffix) {
     const int id = NativeColorMessage(klass, color);
     if (id < 0) return {};
-    const std::vector<std::string>& records = Messages(suffix);
+    const std::vector<std::string>& records = Sheet("SystemMsg", suffix);
     if (size_t(id) >= records.size()) return {};
     std::string name = records[size_t(id)];
     while (!name.empty() && name.back() == ' ') name.pop_back();

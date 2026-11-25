@@ -1,4 +1,5 @@
 #include "early_story_online.h"
+#include "difficulty.h"
 #include "network_access.h"
 
 #include <stdatomic.h>
@@ -128,6 +129,12 @@ void GUEST_HOOK_ABI early_story_selector_hook(GuestRegs *regs) {
     uint8_t *real = (uint8_t *)(uintptr_t)(regs->rax + offset + 0xa8);
     const int visiting = follow_session(real);
     early_story_note_own_step(real[EARLY_STORY_RECORD_STEP]);
+    const int player = (int)(offset / EARLY_STORY_RECORD_SIZE) + 1;
+    const int raw = real[DCP_DIFFICULTY_RECORD_OFFSET];
+    int32_t state;
+    memcpy(&state, real + DCP_RECORD_STATE_OFFSET, sizeof(state));
+    if (state != -1 && early_story_note_own_difficulty(player, raw))
+        printf("Character difficulty: player=%d difficulty=%s raw=%d\n", player, dcp_difficulty_name(dcp_difficulty_of(raw)), raw);
     if (real_record_wanted || !visiting) return;
     uint8_t *copy = shadow[offset / EARLY_STORY_RECORD_SIZE];
     memcpy(copy, real, EARLY_STORY_RECORD_SIZE);

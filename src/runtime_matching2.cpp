@@ -24,6 +24,7 @@
 #include "appearance_session.h"
 #include "boss_battle_online.h"
 #include "dcp_party.h"
+#include "difficulty.h"
 #include "early_story_session.h"
 #include "net/relay_ends.h"
 #include "net/relay_frame.h"
@@ -1355,6 +1356,12 @@ DCP_SYSV int32_t m2_create_join_room(uint16_t context, const uint8_t* request, c
     body.set("bin_int", BinAttrs(Rd<const uint8_t*>(request, 0x60), Rd<uint64_t>(request, 0x68)));
     body.set("bin_ext", BinAttrs(Rd<const uint8_t*>(request, 0x90), Rd<uint64_t>(request, 0x98)));
     body.set("member_bin", BinAttrs(Rd<const uint8_t*>(request, 0xa0), Rd<uint64_t>(request, 0xa8)));
+    const int own_difficulty = early_story_own_difficulty();
+    if (own_difficulty != EARLY_STORY_NO_DIFFICULTY) {
+        const DcpDifficulty difficulty = dcp_difficulty_of(own_difficulty);
+        body.set("difficulty", std::string(dcp_difficulty_wire(difficulty)));
+        std::printf("Online: room difficulty %s\n", dcp_difficulty_name(difficulty));
+    }
     std::printf("Matching2: create room (slots %lld, flags 0x%08llx%s)\n", (long long)body["slots"].as_int(),
                 (unsigned long long)body["flags"].as_int(),
                 story_room ? ", story session" : boss_attr != BOSS_BATTLE_ROOM_NONE ? ", Boss Battle session" : "");

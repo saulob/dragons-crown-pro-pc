@@ -188,7 +188,9 @@ public:
         Image& image = slot_images[image_id];
         TrackImage(image_id);
         TouchImage(image);
-        RefreshImage(image);
+        if (RefreshImage(image)) {
+            NotifyCpuRefresh(image_id);
+        }
         SynchronizeAlias(image_id);
     }
 
@@ -209,8 +211,9 @@ public:
     /// Creates a new image with provided image info and copies subresources from image_id
     [[nodiscard]] ImageId ExpandImage(const ImageInfo& info, ImageId image_id);
 
-    /// Reuploads image contents.
-    void RefreshImage(Image& image);
+    /// Reuploads image contents; true when guest memory was uploaded.
+    bool RefreshImage(Image& image);
+    void NotifyCpuRefresh(ImageId image_id);
 
     /// Retrieves the sampler that matches the provided S# descriptor.
     /// extra_lod_bias: dcp, added to the S#'s bias (reduced scene rendering).

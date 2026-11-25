@@ -67,6 +67,7 @@ Linux offers every Windows feature except **Allow overlay programs**. Where the 
 | Windows | Linux |
 | --- | --- |
 | Native file dialog for **Install game...** | `zenity` or `kdialog` when installed, else the launcher's own chooser |
+| **Export PS4 save...** / **Import PS4 save...** / **Import PS3 save...** on the Saves page | The same choosers; the launcher's own one picks folders only (a folder holding SAVE0.DAT, a PS3 save folder, or the folder to export to), so a ZIP is imported through `zenity` or `kdialog`. ZIP reading uses the zlib the launcher already links |
 | Hold Shift while starting | Shift is read from the X server in an X11 session; a Wayland desktop shows X11 programs no keys while another window has focus, so there, and in Gaming Mode, use `--launcher` (the Steam Deck's Launch Options) or the desktop entry's **Show launcher** action |
 | **Show settings file** selects the file in Explorer | opens the settings folder with `xdg-open` |
 | Launcher and game window positions are restored | restored on X11; a Wayland compositor decides where windows go, so the position may not be restored there |
@@ -85,16 +86,21 @@ a guest flip until the presenter has taken the previous frame and asks for the s
 a Steam frame limit from queueing frames. Gamescope paces presentation itself, so VSync Off and Frame rate settings above
 the display's refresh may not show there.
 
-**Touchscreens under Gamescope** (SteamOS, Steam Deck, Xbox Ally X and similar handhelds): by default Gamescope turns a
-touch into a mouse pointer and a left click, which the game would read as a mouse (and, with the default bindings, as
-Square). While the game window has focus the game asks Gamescope for its Passthrough touch mode (the root property
-`STEAM_TOUCH_CLICK_MODE` on the game's X server, written through libX11) and puts the previous value back when the window
-loses focus or closes. A physical touchscreen is then the DualShock 4 touch surface: a contact is a touchpad contact and a
-short tap is a touchpad click; it moves no host cursor and presses no mouse button. Mice and Steam Virtual Gamepads are
-unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps Gamescope's own touch handling. The log
-shows `Touchscreen telemetry: event=touch_route_ready video=<wayland|x11> gamescope=<yes|no> direct_devices=<n>`, and
-`touchscreen_fallback_used` when the mode was changed (`touchscreen_fallback_unavailable` when libX11 or the X server could
-not be reached); bug report DCP-8G6HDU.
+**Touchscreens under Gamescope** (SteamOS, Steam Deck, Xbox Ally X and similar handhelds): Gamescope turns a touch into
+a mouse pointer and a left click unless its touch click mode is Passthrough, and it keeps one mode for the whole
+compositor: the newest `STEAM_TOUCH_CLICK_MODE` write on any of its Xwayland roots wins. Gaming Mode usually runs two
+roots, the game's and the one Steam uses, and Steam writes its own Left mode there again. While the game window has focus
+the game therefore asks for Passthrough through libX11 on its own display and on any other local Gamescope root it can
+discover, and rewrites it about once a second; a write is needed even when the game's own root still reads Passthrough,
+because the competing write lands on the other root. Each root's previous value is restored on focus loss and on exit,
+and a value Steam changed in the meantime is left alone. A physical touchscreen is then the DualShock 4 touch surface: a
+contact is a touchpad contact and a short tap is a touchpad click; it moves no host cursor and presses no mouse button.
+Mice, the Steam Deck trackpads and Steam Virtual Gamepads are unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps
+Gamescope's own touch handling. The log shows `Touchscreen telemetry: event=touch_route_ready video=<wayland|x11>
+gamescope=<yes|no> direct_devices=<n>`, then `gamescope_touch_claim roots=<n> compositor=<yes|no>` (or
+`gamescope_touch_claim_failed reason=<x11|display>`), the bounded `gamescope_touch_reassert`, and per touch
+`touchscreen_detected`, `touchscreen_touchpad_used` and `touchscreen_synthetic_mouse_suppressed`; bug reports DCP-8G6HDU
+and DCP-Y9F9QZ.
 
 **Steam Deck trackpad** (Gaming Mode, `SteamDeck=1` under Gamescope): Steam Input presents the trackpads to the game as a
 mouse, and the Steam Virtual Gamepad (28de:11ff) has no touchpad, so the game cannot read them as a controller touchpad. With

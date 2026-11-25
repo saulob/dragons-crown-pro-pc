@@ -356,16 +356,21 @@ Android rooms that **used relay**, meaning the relay carried at least one frame 
   country.
 - A session is a sign-in of the launcher or the game to the online service that has no counted sign-in of the same
   account in the previous 10 minutes, so a quick reconnect is not counted again and sessions are not a number of players.
-  There is no unique-player count for these statistics.
+  The only count of players is the total number of registered accounts, read from the account table; there is no
+  per-day or per-player count.
 - The one exception is Early Story Online. The online service keeps, for each account that hosted or joined an Early Story
   Online room, its online name, its account id, how many such rooms it took part in as host and as guest, and when it last
   did. It exists so the maintainer can see who uses the feature; it holds no address, endpoint, room or join code, only the
   maintainer sees it on the same private page, and merely turning the option on records nothing. The game sends nothing
   extra for it: it comes from the room requests the game already makes.
 - Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Saves, character names, levels, equipment, gold,
-  progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below, the game sends nothing
+  progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below and
+  the host character's difficulty in the request that creates a room, kept only as a count per day, the game sends nothing
   extra for these statistics: they come from the sign-in and room requests it already makes.
-- Only the maintainer can see them, on a private, password-protected page of the online service.
+- A few totals are public (`GET /stats`, server/lobby/README.md): players online, in rooms and in the Lobby, open rooms, the
+  day's and the last 30 days' rooms, joins and sessions, the classes in reported parties, and the sessions and accounts
+  since the start. The launcher's Home page reads them and GitHub's download count, also while Online Play is off, without
+  an account or identifier. Everything else is seen only by the maintainer, on a private, password-protected page.
 
 The online service itself still needs your account, Online name, friends and, while you are in a room, your address and
 port to connect you to other players; that is described below and is not part of these statistics.
@@ -421,9 +426,12 @@ duration and Player 1 to 4 colour are the game's; only the text it carries is re
 in its own Menu & Subtitles language (`src/comms_text.c`, the same ten languages as Boss Battle), so an English player
 reads "Need help" while a Brazilian Portuguese player reads "Preciso de ajuda".
 
-- **Controller.** Press D-pad Up once: the wheel opens and stays open. Move the right stick to pick a sector (the pick
-  stays when the stick returns to the centre), press Cross (A) to send and close, or Circle (B) to close without sending.
-  While the wheel is open the game sees no D-pad Up, right stick, Cross or Circle.
+- **Controller.** Press the configured Controller Comms Wheel Shortcut (**View / Back + D-pad Up** by default; configurable
+  in Controls > Controller shortcuts to `View / Back + D-pad Up`, `L1 + D-pad Up`, `R1 + D-pad Up`, legacy `D-pad Up`, or
+  `Off`) once: the wheel opens and stays open. Bare D-pad directions pass to the game unchanged unless `D-pad Up` is
+  explicitly selected. Move the right stick to pick a sector (the pick stays when the stick returns to the centre), press
+  Cross (A) to send and close, or Circle (B) to close without sending. While the wheel is open the game sees no opener
+  buttons, D-pad Up, right stick, Cross or Circle.
 - **Keyboard and mouse.** Press the Comms Wheel key (T by default, rebindable in Controls) once: the wheel opens and stays
   open. Pick with the mouse or with the direction keys (the left and right stick keys, WASD and the arrows by default),
   send with the left mouse button or the Cross key, cancel with Escape or the right mouse button. While the wheel is open
@@ -605,7 +613,7 @@ lower-case hex.
 | `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay), `story_session`, `boss_battle_session`, `appearance` (optional) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload, story_session, boss_battle_session, appearance}` (absent from an older lobby) |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
 | `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only), `public_ip` (optional, public IPv4 of a client connected over IPv6) | `ip` (as the lobby sees it), `port`, `public_ip` (when accepted) |
-| `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]` | `room`, `me`, `appearances` (with `appearance` declared) |
+| `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]`, optional `difficulty` (`normal`, `hard`, `infernal`, `ultimate`, `unknown`, or the raw game value; any other type is `bad_request`) | `room`, `me`, `appearances` (with `appearance` declared) |
 | `room.search` | `world`, `from` (1-based), `count` (<= 20), `flag_mask`, `flag_value`, `filters: [[id, op, value]]` (op 1 = 2 != 3 < 4 <= 5 > 6 >=); or `code` | `total`, `from`, `rooms`, `incompatible` (rooms of another protocol left out) |
 | `room.join` | `room` or `code`, `member_bin` | `room`, `me`, `appearances: [{member, appearance: {schema, data}}]` (the other members' looks, with `appearance` declared); `incompatible` with the room's `online_protocol` and its owner's `version`, `platform` |
 | `room.leave` / `room.resume` | `room` / `room`, `member` | - / `room`, `me`, `appearances` |

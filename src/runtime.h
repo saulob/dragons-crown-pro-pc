@@ -50,6 +50,9 @@ uintptr_t runtime_font_resolve(const char *name);
 /* The accented letters composed into the font atlas, `cell` pixels square; the data must outlive the process's fonts. */
 typedef struct { uint32_t code, base; const uint8_t *alpha, *base_alpha; } RuntimeComposedGlyph;
 void runtime_font_set_composed_glyphs(const RuntimeComposedGlyph *glyphs, size_t count, int cell);
+/* The text is the port's Korean: the European system font set opens Noto Sans KR, so the character messages, which the
+ * system font draws, have the Hangul the game's own font lacks. */
+void runtime_font_set_korean(int korean);
 uintptr_t runtime_eventflag_resolve(const char *name);
 /* The dcp.ini whose keyboard bindings the pad reads, once, at the first sample. */
 void runtime_pad_set_settings(const char *settings_file);
@@ -57,6 +60,8 @@ void runtime_pad_set_settings(const char *settings_file);
 void runtime_pad_set_rumble(int enabled);
 /* 1 when the slot is Player 1 or has a live gamepad; 0 for a slot the game may drive with AI. */
 int runtime_pad_slot_human(int slot);
+/* The player (0..3) the controller with this SDL instance id drives, -1 when it has none. */
+int runtime_pad_player_of_instance(uint32_t instance);
 uintptr_t runtime_pad_resolve(const char *name);
 void runtime_pad_report(void);
 void runtime_sema_report(void);

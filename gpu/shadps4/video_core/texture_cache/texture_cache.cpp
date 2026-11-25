@@ -4,6 +4,7 @@
 #include <xxhash.h>
 #include "video_core/amdgpu/liverpool.h"
 
+#include "character_highlight.h"
 #include "dcp_amd_water_fix.h"
 #include "dcp_toggles.h"
 #include "common/assert.h"
@@ -1127,9 +1128,9 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
     return image.FindView(desc.view_info, false);
 }
 
-void TextureCache::RefreshImage(Image& image) {
+bool TextureCache::RefreshImage(Image& image) {
     if (False(image.flags & ImageFlagBits::Dirty) || image.info.num_samples > 1) {
-        return;
+        return false;
     }
     ResolveReadbacks(image.info.guest_address, image.info.guest_size, true,
                      ReadbackSource::ImageRefresh);
@@ -1153,7 +1154,7 @@ void TextureCache::RefreshImage(Image& image) {
         const u64 hash = XXH3_64bits(addr, size);
         if (image.hash == hash) {
             image.flags &= ~ImageFlagBits::MaybeCpuDirty;
-            return;
+            return false;
         }
         image.hash = hash;
     }
@@ -1201,7 +1202,7 @@ void TextureCache::RefreshImage(Image& image) {
 
     if (image_copies.empty()) {
         image.flags &= ~ImageFlagBits::Dirty;
-        return;
+        return false;
     }
 
     scheduler.EndRendering();
@@ -1214,6 +1215,13 @@ void TextureCache::RefreshImage(Image& image) {
     }
 
     runtime.UploadImage(&image, buffer, image_copies);
+    return true;
+}
+
+void TextureCache::NotifyCpuRefresh(ImageId image_id) {
+    const Image& image = slot_images[image_id];
+    character_highlight_image_refreshed(image_id.index, image.info.guest_address, image.info.guest_size,
+                                        image.info.size.width, image.info.size.height);
 }
 
 vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
@@ -1242,6 +1250,8 @@ void TextureCache::RegisterImage(ImageId image_id) {
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
+    character_highlight_image_registered(image_id.index, image.info.guest_address, image.info.guest_size,
+                                         image.info.size.width, image.info.size.height);
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
@@ -1277,6 +1287,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
                "Trying to unregister an already unregistered image");
     image.flags &= ~ImageFlagBits::Registered;
     ++registry_generation;
+    character_highlight_image_unregistered(image_id.index);
     lru_cache.Free(image.lru_id);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {

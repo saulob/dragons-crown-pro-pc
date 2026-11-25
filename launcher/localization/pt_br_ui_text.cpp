@@ -354,6 +354,12 @@ Exit Game	Sair do jogo
 Controller shortcuts	Atalhos do controle
 Controller Exit Shortcut	Atalho de saída pelo controle
 Hold L1 + R1 + Options for 2 seconds to close the game. Applies at the next game start.	Segure L1 + R1 + Options por 2 segundos para fechar o jogo. Vale a partir do próximo início do jogo.
+Controller Comms Wheel Shortcut	Atalho da roda de comunicação pelo controle
+Opens the Comms Wheel in online rooms. Bare D-pad Up stays normal game input unless D-pad Up is selected. Applies at the next game start.	Abre a roda de comunicação em salas online. O direcional para cima sozinho continua sendo comando normal do jogo, a menos que Direcional cima seja selecionado. Vale a partir do próximo início do jogo.
+View / Back + D-pad Up	View / Back + Direcional cima
+L1 + D-pad Up	L1 + Direcional cima
+R1 + D-pad Up	R1 + Direcional cima
+D-pad Up	Direcional cima
 This open source PC port is maintained and developed in my free time. If you enjoy the project and would like to support its continued development, you can sponsor my work on GitHub.	Este port para PC de código aberto é mantido e desenvolvido no meu tempo livre. Se você gosta do projeto e quer apoiar seu desenvolvimento contínuo, pode patrocinar meu trabalho pelo GitHub.
 Support is completely optional and helps support ongoing improvements and future projects.	O apoio é totalmente opcional e ajuda no desenvolvimento de melhorias e novos projetos.
 Dragon's Crown Pro for PlayStation 4, running natively on this PC. The game itself is not included; it runs from the user's own copy.	Dragon's Crown Pro para PlayStation 4, rodando nativamente neste PC. O jogo em si não está incluído; ele roda a partir da cópia do próprio usuário.
@@ -553,7 +559,7 @@ Choose the .pkg file. Controller: D-pad to move, A to choose, B to cancel.	Escol
 Select this folder	Selecionar esta pasta
 Open the folder with eboot.bin, sce_module and sce_sys, then select it. Controller: D-pad to move, A to open, B to cancel.	Abra a pasta com eboot.bin, sce_module e sce_sys e selecione-a. Controle: direcional para mover, A para escolher, B para cancelar.
 Program folder	Pasta do programa
-Home	Pasta pessoal
+Home folder	Pasta pessoal
 Downloads	Downloads
 Desktop	Área de trabalho
 Documents	Documentos
@@ -627,6 +633,12 @@ Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Fight
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Online, only the host needs this option; guests with a compatible version join automatically.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Online, só o anfitrião precisa desta opção; convidados com versão compatível entram automaticamente.
 Adds Boss Battle to the Dragon's Haven Inn menu, after Report adventurers. Applies the next time the Inn menu opens. Fights there never change campaign progress. Online, only the host needs this option.	Adiciona Batalha de Chefes ao menu da Dragon's Haven Inn, depois de Report adventurers. Vale a partir da próxima vez que o menu da taverna abrir. As lutas ali nunca alteram o progresso da campanha. Online, só o anfitrião precisa desta opção.
 Boss Battle	Batalha de Chefes
+Character Highlight	Destaque do personagem
+View / Back + R3	View / Back + R3
+View / Back + L3	View / Back + L3
+L1 + R3	L1 + R3
+R1 + L3	R1 + L3
+Highlights your locally controlled character on this screen only: the chord on a controller outlines the player it drives, and again turns it off. Never shared online; every session starts with it off.	Destaca somente o personagem controlado localmente nesta tela: o atalho no controle contorna o jogador que ele controla, e de novo desliga. Nunca é compartilhado online; toda sessão começa desligada.
 Unlock Labyrinth of Chaos	Desbloquear Labirinto do Caos
 Unlock Ultimate + Tower of Mirages	Desbloquear Supremo + Torre das Miragens
 Opens the Labyrinth of Chaos as soon as the Stables are available. Floors, rewards and progress stay the game's own.	Abre o Labirinto do Caos assim que os Estábulos estiverem disponíveis. Andares, recompensas e progresso continuam sendo os do próprio jogo.
@@ -791,7 +803,6 @@ The developer replied to one of your reports.	O desenvolvedor respondeu a um dos
 New reply	Nova resposta
 No longer available	Não está mais disponível
 This report was removed from the online service. The last known status is shown.	Este relatório foi removido do serviço online. O último status conhecido é mostrado.
-Show	Mostrar
 The report was sent, but it could not be added to My reports on this PC.	O relatório foi enviado, mas não pôde ser adicionado a Meus relatórios neste PC.
 Last gameplay	Última partida
 Gameplay session	Sessão de jogo
@@ -837,15 +848,12 @@ You have unsaved changes. Apply them, discard them, or cancel.	Voce tem alteraco
 Select save	Selecionar save
 None	Nenhum
 Current	Atual
-Region	Regiao
 Modified	Modificado
 Characters	Personagens
 DATA slot	Slot DATA
 The three DATA records inside SAVE0.DAT. Gold belongs to the DATA slot, not to a character.	Os tres registros DATA dentro do SAVE0.DAT. O ouro pertence ao slot DATA, nao a um personagem.
 The gold of this DATA slot, up to 99,999,999.	O ouro deste slot DATA, ate 99.999.999.
 Import and Backup	Importar e backup
-Import save	Importar save
-Import save...	Importar save...
 Select a Dragon's Crown save	Selecione um save de Dragon's Crown
 Save files	Arquivos de save
 Import rejected	Importacao recusada
@@ -887,10 +895,24 @@ The character's name, up to 8 letters.	O nome do personagem, ate 8 letras.
 Level	Nivel
 Skill Points	Pontos de habilidade
 Skill points available to spend.	Pontos de habilidade disponiveis para gastar.
+Gold belongs to this save data	Ouro pertence a este save
+Stats	Atributos
 Current HP	HP atual
 Current hit points; at most the maximum.	Pontos de vida atuais; no maximo o maximo.
-Max HP	HP maximo
 Maximum hit points.	Pontos de vida maximos.
+STR (Strength)	STR (Força)
+CON (Constitution)	CON (Constituição)
+DEX (Dexterity)	DEX (Destreza)
+INT (Intelligence)	INT (Inteligência)
+MGR (Magic Resistance)	MGR (Resistência Mágica)
+LUC (Luck)	LUC (Sorte)
+Could not write the character stats; nothing was applied.	Não foi possível gravar os atributos do personagem; nada foi aplicado.
+Difficulty	Dificuldade
+Difficulty belongs to this character and can be changed here	A dificuldade pertence a este personagem e pode ser alterada aqui
+Normal	Normal
+Hard	Difícil
+Infernal	Infernal
+Ultimate	Supremo
 Select a character first.	Selecione um personagem primeiro.
 Owned by	Pertence a
 Difficulty, story progress, the Labyrinth of Chaos and the Tower of Mirages are shown as they become proven. Gold is edited under Save; it belongs to the DATA slot.	Dificuldade, progresso da historia, o Labirinto do Caos e a Torre de Miragens aparecem quando forem comprovados. O ouro e editado em Save; pertence ao slot DATA.
@@ -1015,7 +1037,6 @@ Restores the saved values.	Restaura os valores salvos.
 Apply or discard the pending changes first.	Aplique ou descarte as alteracoes pendentes primeiro.
 No installed game build was found. Install the game first; every title's saves are listed below.	Nenhuma build instalada do jogo foi encontrada. Instale o jogo primeiro; os saves de todos os titulos aparecem abaixo.
 Apply or discard the pending changes to switch build.	Aplique ou descarte as alteracoes pendentes para trocar de build.
-Title ID	ID do titulo
 Version	Versao
 Prepared image	Imagem preparada
 Language archive	Arquivo de idioma
@@ -1036,6 +1057,218 @@ Invalid appearance value	Valor de aparencia invalido
 A character has an invalid appearance value. Pick a color for it, then Apply Changes.	Um personagem tem um valor de aparencia invalido. Escolha uma cor para ele e depois use Aplicar alteracoes.
 The preview draws the default weapon, not the equipped one.	A previa mostra a arma padrao, nao a equipada.
 Each class is painted in five colors. A color changes hair, skin, clothing and armor together; it is the same color the game's Edit character screen sets.	Cada classe tem cinco cores. Uma cor muda cabelo, pele, roupa e armadura juntos; e a mesma cor que a tela Editar personagem do jogo define.
-Character art unavailable	Arte do personagem indisponivel)PTBR";
+Character art unavailable	Arte do personagem indisponivel
+Saves	Saves
+Your SAVE0.DAT files: overview, backups, export, import and restore.	Seus arquivos SAVE0.DAT: visão geral, backups, exportação, importação e restauração.
+Characters, appearance and inventory.	Personagens, aparência e inventário.
+Loading saves...	Carregando saves...
+Selected save	Save selecionado
+No saves found	Nenhum save encontrado
+Play the game once and save, then come back. Saves are kept in the user folder's savedata folder.	Jogue uma vez e salve, depois volte aqui. Os saves ficam na pasta savedata da pasta do usuário.
+Valid save	Save válido
+This save cannot be used	Este save não pode ser usado
+It is shown for reference only: nothing on this page will back it up or replace it.	Ele aparece só como referência: nada nesta página fará backup dele ou o substituirá.
+This save belongs to the installed game.	Este save pertence ao jogo instalado.
+Overview	Visão geral
+Save folder	Pasta do save
+CRC	CRC
+File size	Tamanho do arquivo
+Invalid	Inválido
+Unreadable	Ilegível
+Invalid: wrong file size	Inválido: tamanho de arquivo incorreto
+Invalid: not a Dragon's Crown save	Inválido: não é um save de Dragon's Crown
+Corrupt: CRC mismatch	Corrompido: CRC não confere
+Not checked	Não verificado
+DATA Slots	Slots DATA
+Empty	Vazio
+The Editor edits the saves of the installed game.	O Editor edita os saves do jogo instalado.
+Save Management	Gerenciamento de saves
+Copies this SAVE0.DAT into the backup folder. The save is not changed.	Copia este SAVE0.DAT para a pasta de backup. O save não é alterado.
+Backups	Backups
+Where the backups of every save are kept.	Onde ficam os backups de todos os saves.
+Folder containing SAVE0.DAT...	Pasta que contém o SAVE0.DAT...
+No save is selected.	Nenhum save selecionado.
+The game is starting. Saves cannot be changed now.	O jogo está iniciando. Os saves não podem ser alterados agora.
+This save is not valid, so it cannot be backed up, exported or replaced from here.	Este save não é válido, então não pode receber backup, ser exportado ou substituído por aqui.
+The Editor has unapplied changes. Apply or discard them on the Editor page before you import or restore a save.	O Editor tem alterações não aplicadas. Aplique ou descarte na página Editor antes de importar ou restaurar um save.
+Choose an existing folder.	Escolha uma pasta existente.
+That is the selected save itself. Choose another folder.	Essa é a pasta do próprio save selecionado. Escolha outra pasta.
+Exporting into the launcher's savedata folder would replace a save without a backup. Use Import instead.	Exportar para a pasta savedata do launcher substituiria um save sem backup. Use Importar.
+That folder holds a folder named SAVE0.DAT. Choose another folder.	Essa pasta tem uma pasta chamada SAVE0.DAT. Escolha outra pasta.
+Save exported.	Save exportado.
+Could not export the save.	Não foi possível exportar o save.
+This save cannot be imported.	Este save não pode ser importado.
+The chosen folder already has a SAVE0.DAT. Replace it with a copy of this save?	A pasta escolhida já tem um SAVE0.DAT. Substituí-lo por uma cópia deste save?
+Replace existing file	Substituir arquivo existente
+The file in the chosen folder is replaced; the selected save is not changed.	O arquivo da pasta escolhida é substituído; o save selecionado não é alterado.
+Replace file...	Substituir arquivo...
+Cancel export	Cancelar exportação
+Source	Origem
+Replaces	Substitui
+Backup	Backup
+Replace the selected save with the imported SAVE0.DAT?	Substituir o save selecionado pelo SAVE0.DAT importado?
+The selected save is backed up first.	Antes é feito um backup do save selecionado.
+Replace the selected save	Substituir o save selecionado
+Import and replace...	Importar e substituir...
+Import	Importar
+Save imported. The previous save was backed up.	Save importado. O save anterior recebeu um backup.
+Import failed; the selected save was not changed.	A importação falhou; o save selecionado não foi alterado.
+Cancel import	Cancelar importação
+No backups of this save yet. The launcher also makes one before every change it writes.	Ainda não há backups deste save. O launcher também faz um antes de cada alteração que grava.
+Replace the selected save with this backup?	Substituir o save selecionado por este backup?
+Restore...	Restaurar...
+Backup restored. The previous save was backed up.	Backup restaurado. O save anterior recebeu um backup.
+Restore failed; the selected save was not changed.	A restauração falhou; o save selecionado não foi alterado.
+Details	Detalhes
+File	Arquivo
+Backup folder	Pasta de backup
+Choose the folder to export SAVE0.DAT to	Escolha a pasta para onde exportar o SAVE0.DAT
+Choose the folder holding SAVE0.DAT	Escolha a pasta que contém o SAVE0.DAT
+Open the folder, then select it. Controller: D-pad to move, A to open, B to cancel.	Abra a pasta e depois selecione-a. Controle: direcional para mover, A para abrir, B para cancelar.
+Dragon's Crown save (SAVE0.DAT)	Save de Dragon's Crown (SAVE0.DAT)
+The save changed on disk since the Editor loaded it, so the changes were not written. The Editor reloaded the save.	O save mudou no disco desde que o Editor o carregou, então as alterações não foram gravadas. O Editor recarregou o save.
+No installed game	Nenhum jogo instalado
+Install the game on the Play page. The Saves page manages the saves of the installed game.	Instale o jogo na página Jogar. A página Saves gerencia os saves do jogo instalado.
+The save folders of the installed game. Choosing one never changes it.	As pastas de save do jogo instalado. Escolher uma nunca a altera.
+SAVE0.DAT file	Arquivo SAVE0.DAT
+Folder	Pasta
+ZIP archive	Arquivo ZIP
+RAR archive	Arquivo RAR
+Source type	Tipo de origem
+Format	Formato
+SAVE0.DAT	SAVE0.DAT
+Yes	Sim
+No	Não
+Dismiss	Dispensar
+PS Vita saves have not been verified with Dragon's Crown Pro. The file passes the Pro checks, but the game may not read it as expected.	Saves de PS Vita não foram verificados com Dragon's Crown Pro. O arquivo passa nas verificações do Pro, mas o jogo pode não lê-lo como esperado.
+SAVE0.DAT or ZIP archive...	SAVE0.DAT ou arquivo ZIP...
+The character's level. Press Enter to confirm a typed value.	O nível do personagem. Pressione Enter para confirmar um valor digitado.
+A character has an invalid appearance value. Fix it on the Editor page first.	Um personagem tem um valor de aparência inválido. Corrija-o primeiro na página Editor.
+The source could not be read.	A origem não pôde ser lida.
+The file is too large to be a Dragon's Crown save.	O arquivo é grande demais para ser um save de Dragon's Crown.
+No SAVE0.DAT was found.	Nenhum SAVE0.DAT foi encontrado.
+More than one different SAVE0.DAT was found. Choose the folder or archive of a single save.	Mais de um SAVE0.DAT diferente foi encontrado. Escolha a pasta ou o arquivo de um único save.
+RAR archives are not opened by the launcher. Extract it first, then import the extracted folder.	O launcher não abre arquivos RAR. Extraia-o primeiro e depois importe a pasta extraída.
+The archive could not be read as a ZIP file.	O arquivo não pôde ser lido como ZIP.
+The archive has an unsafe file path and was not opened.	O arquivo tem um caminho inseguro e não foi aberto.
+The archive is too large, or holds too many files, to be a single save.	O arquivo é grande demais, ou tem arquivos demais, para ser um único save.
+The archive is password protected.	O arquivo é protegido por senha.
+This PS Vita save is still encrypted. Export a decrypted SAVE0.DAT first.	Este save de PS Vita ainda está criptografado. Exporte antes um SAVE0.DAT descriptografado.
+This is not a valid Dragon's Crown Pro SAVE0.DAT.	Este não é um SAVE0.DAT válido de Dragon's Crown Pro.
+PS3 container, encrypted	Contêiner de PS3, criptografado
+PS3 layout, big-endian	Layout de PS3, big-endian
+PS Vita container, encrypted	Contêiner de PS Vita, criptografado
+Not a Dragon's Crown Pro save	Não é um save de Dragon's Crown Pro
+Dragon's Crown Pro layout	Layout de Dragon's Crown Pro
+Supported	Suportada
+Not supported	Não suportada
+A PS3 save needs its PARAM.PFD beside SAVE0.DAT. Choose the save folder or a ZIP of it, not SAVE0.DAT alone.	Um save de PS3 precisa do PARAM.PFD ao lado do SAVE0.DAT. Escolha a pasta do save ou um ZIP dela, não só o SAVE0.DAT.
+PARAM.PFD could not be read as the description of a Dragon's Crown PS3 save.	Não foi possível ler o PARAM.PFD como a descrição de um save de Dragon's Crown de PS3.
+This PS3 save is not from Dragon's Crown, so it is not supported.	Este save de PS3 não é de Dragon's Crown, então não é suportado.
+SAVE0.DAT does not match its PARAM.PFD: the save is damaged or was modified.	O SAVE0.DAT não confere com o PARAM.PFD: o save está danificado ou foi modificado.
+SAVE0.DAT could not be decrypted into a Dragon's Crown save.	Não foi possível descriptografar o SAVE0.DAT em um save de Dragon's Crown.
+PS3 layout, big-endian (decrypted)	Layout de PS3, big-endian (descriptografado)
+Unsupported PS3 save layout: only PS3 saves of layout version 36 can be converted, and this save uses a different one.	Layout de save de PS3 não suportado: só saves de PS3 com layout de versão 36 podem ser convertidos, e este save usa outro.
+Export PS4 save	Exportar save de PS4
+Export PS4 save...	Exportar save de PS4...
+Copies this Dragon's Crown Pro SAVE0.DAT, byte for byte, into a folder you choose.	Copia este SAVE0.DAT do Dragon's Crown Pro, byte a byte, para uma pasta que você escolher.
+Import PS4 save	Importar save de PS4
+Import PS4 save...	Importar save de PS4...
+Replaces this save with a Dragon's Crown Pro SAVE0.DAT, a folder holding one, or a ZIP of it, after a confirmation. This save is backed up first.	Substitui este save por um SAVE0.DAT do Dragon's Crown Pro, uma pasta que contenha um, ou um ZIP dele, após uma confirmação. Este save recebe um backup antes.
+Import PS3 save	Importar save de PS3
+Import PS3 save...	Importar save de PS3...
+Replaces this save with a Dragon's Crown PS3 save: its folder, or a ZIP of it, with SAVE0.DAT and PARAM.PFD. It is decrypted and converted, and this save is backed up first.	Substitui este save por um save de PS3 do Dragon's Crown: a pasta dele, ou um ZIP dela, com SAVE0.DAT e PARAM.PFD. Ele é descriptografado e convertido, e este save recebe um backup antes.
+ZIP archive of a PS3 save...	Arquivo ZIP de um save de PS3...
+PS3 save folder (SAVE0.DAT and PARAM.PFD)...	Pasta do save de PS3 (SAVE0.DAT e PARAM.PFD)...
+Replace the selected save with the converted PS3 save?	Substituir o save selecionado pelo save de PS3 convertido?
+This is a PS3 save. Use Import PS3 save.	Este é um save de PS3. Use Importar save de PS3.
+This is a Dragon's Crown Pro save. Use Import PS4 save.	Este é um save do Dragon's Crown Pro. Use Importar save de PS4.
+This is a PS Vita save, not a PS3 save. Use Import PS4 save.	Este é um save de PS Vita, não de PS3. Use Importar save de PS4.
+Open Editor	Abrir Editor
+Names, levels, skill points, HP and appearance are edited on the Editor page.	Nomes, níveis, pontos de habilidade, HP e aparência são editados na página Editor.
+Choose the PS3 save folder (SAVE0.DAT and PARAM.PFD)	Escolha a pasta do save de PS3 (SAVE0.DAT e PARAM.PFD)
+Choose a SAVE0.DAT or an archive of a PS4 save	Escolha um SAVE0.DAT ou um arquivo de um save de PS4
+Choose an archive of a PS3 save	Escolha um arquivo de um save de PS3
+Save status	Status do save
+Your current save will be backed up before it is replaced	Seu save atual receberá um backup antes de ser substituído
+Showing latest {shown} of {total}	Mostrando os {shown} mais recentes de {total}
+backup	backup
+backups	backups
+Delete...	Excluir...
+Delete backup	Excluir backup
+This permanently deletes this backup	Isto exclui este backup permanentemente
+Delete failed	Falha ao excluir
+Backup deleted.	Backup excluído.
+Max HP	HP máximo
+Edit Inventory	Editar inventário
+Inventory Editor	Editor de inventário
+Attack, durability, required level and the modifier values can be changed. Nothing is written until Apply Changes.	Ataque, durabilidade, nível necessário e os valores dos modificadores podem ser alterados. Nada é gravado até Aplicar alterações.
+Item names are unavailable because the game files could not be read.	Os nomes dos itens estão indisponíveis porque os arquivos do jogo não puderam ser lidos.
+Weapon	Arma
+Accessory	Acessório
+Item	Item
+Items	Itens
+Items are shown as the game names them; the editor does not change them.	Itens são mostrados como o jogo os nomeia; o editor não os altera.
+Other	Outros
+Shared storage	Armazenamento compartilhado
+Not understood	Não compreendido
+Select an item to see its details.	Selecione um item para ver os detalhes.
+Shared by every character in this DATA slot.	Compartilhado por todos os personagens deste slot DATA.
+This item is not understood by the editor and is kept unchanged.	Este item não é compreendido pelo editor e é mantido sem alterações.
+Durability	Durabilidade
+All	Todos
+Attack min	Ataque mín.
+Attack max	Ataque máx.
+Rank	Rank
+Loading inventory...	Carregando inventário...
+This character and DATA slot have no items.	Este personagem e este slot DATA não têm itens.
+Required level	Nível necessário
+Modifiers	Modificadores
+This item has no modifiers.	Este item não tem modificadores.
+Name will change to	O nome mudará para
+Changing modifier values can also change the item's generated name.	Alterar os valores dos modificadores também pode mudar o nome gerado do item.
+Finish or correct the number you are typing before applying.	Termine ou corrija o número que está digitando antes de aplicar.
+The editor values and the item are out of sync; nothing was saved.	Os valores do editor e o item estão dessincronizados; nada foi salvo.
+Game limit:	Limite do jogo:
+Max durability exceeds the limit the game keeps.	A Durabilidade máxima excede o limite que o jogo mantém.
+Required level is invalid.	O Nível necessário não é válido.
+Modifier value is outside the supported range.	O valor do modificador está fora do intervalo suportado.
+This item cannot be changed.	Este item não pode ser alterado.
+An inventory change is not valid and was not saved.	Uma alteração de inventário não é válida e não foi salva.
+Unknown item %s	Item desconhecido %s
+Unknown modifier %s	Modificador desconhecido %s
+The current HP cannot be higher than the maximum HP.	O HP atual não pode ser maior que o HP máximo.
+Max durability	Durabilidade máxima
+Category	Categoria
+Weapons / Shields	Armas / Escudos
+Search items...	Pesquisar itens...
+Search	Pesquisar
+Sort	Ordenar
+Equipment level	Nível do equipamento
+Bag	Bolsa
+This category has no items.	Esta categoria não tem itens.
+No items match the search.	Nenhum item corresponde à pesquisa.
+Home	Início
+Dragon's Crown Pro PC in numbers	Dragon's Crown Pro PC em números
+THE KINGDOM SO FAR	O REINO ATÉ AGORA
+RIGHT NOW	AGORA
+LAST 30 DAYS	ÚLTIMOS 30 DIAS
+Players online now	Jogadores online agora
+Players playing online	Jogadores jogando online
+Open online games	Partidas online abertas
+Peak players today	Pico de jogadores hoje
+TODAY	HOJE
+Online sessions today	Sessões online hoje
+Online games created today	Partidas online criadas hoje
+Players joined today	Jogadores que entraram hoje
+Multiplayer sessions	Sessões multiplayer
+Online sessions since launch	Sessões online desde o lançamento
+Players since launch	Jogadores desde o lançamento
+MOST PLAYED CLASSES	CLASSES MAIS JOGADAS
+ONLINE LOBBY	LOBBY ONLINE
+INSTALL GAME	INSTALAR JOGO
+MANAGE GAME	GERENCIAR JOGO
+Live statistics unavailable	Estatísticas ao vivo indisponíveis
+Downloads come from GitHub releases. Multiplayer numbers are anonymous aggregate statistics from the online service.	Os downloads vêm das releases do GitHub. Os números do multiplayer são estatísticas agregadas e anônimas do serviço online.)PTBR";
 
 } // namespace dcp::localization

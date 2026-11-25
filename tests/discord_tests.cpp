@@ -268,7 +268,8 @@ void TestWiring() {
     // Without CACHE: an existing build folder must not keep a previous application id.
     CHECK(Has(Source("CMakeLists.txt"), "set(DCP_DISCORD_CLIENT_ID \"" + std::string(kOfficialClientId) + "\")\n"));
     CHECK(Has(loader, "const int discord_presence=!check_imports && !cpu_only && discord_presence_start(settings_file,app0);"));
-    CHECK(Has(loader, "if (discord_presence) runtime_cheats_set_player_observer(party_hook_observe_unit);"));
+    CHECK(Has(loader, "character_highlight_set_forward(discord_presence ? party_hook_observe_unit : NULL);") &&
+          Has(loader, "runtime_cheats_set_player_observer(character_highlight_observe_unit);"));
     // Nothing thrown may reach the game: the C entry and the thread both end in a catch.
     CHECK(Has(presence, "extern \"C\" int discord_presence_start(const char* settings_file, const char* app0) {\n    try {"));
     CHECK(Has(presence, "void Worker(") && Has(presence, "noexcept {\n    LoadPlaces(app0, trace);\n    try {\n        Run("));

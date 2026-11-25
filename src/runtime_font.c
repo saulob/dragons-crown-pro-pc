@@ -90,7 +90,7 @@ typedef struct {
     uint8_t guest_reserved[256];     /* the PS4 handle is a 256-byte object */
 } Font;
 
-/* Noto Sans and Noto Sans TC (third_party/fonts, SIL OFL 1.1) stand in for the firmware's system font sets.
+/* Noto Sans, Noto Sans TC and Noto Sans KR (third_party/fonts, SIL OFL 1.1) stand in for the firmware's system font sets.
  * The bytes are static, so faces opened on them never outlive their data. */
 #ifdef _WIN32
 #define DCP_EMBED(symbol, path) \
@@ -103,8 +103,10 @@ typedef struct {
 #endif
 DCP_EMBED(dcp_noto_sans, DCP_NOTO_SANS_PATH);
 DCP_EMBED(dcp_noto_sans_tc, DCP_NOTO_SANS_TC_PATH);
+DCP_EMBED(dcp_noto_sans_kr, DCP_NOTO_SANS_KR_PATH);
 extern const unsigned char dcp_noto_sans[], dcp_noto_sans_end[];
 extern const unsigned char dcp_noto_sans_tc[], dcp_noto_sans_tc_end[];
+extern const unsigned char dcp_noto_sans_kr[], dcp_noto_sans_kr_end[];
 
 /* The game's own font covers Latin and Japanese; the set only supplies the glyphs it lacks. */
 #define FONTSET_SST_STD_EUROPEAN_JPCJK 0x1807A444u
@@ -121,6 +123,13 @@ static FT_Library freetype; /* created with the first library, kept for the proc
 static const RuntimeComposedGlyph *composed_glyphs;
 static size_t composed_count;
 static int composed_cell;
+static int korean_text; /* runtime_font_set_korean */
+
+void runtime_font_set_korean(int korean) {
+    pthread_mutex_lock(&lock);
+    korean_text=korean!=0;
+    pthread_mutex_unlock(&lock);
+}
 
 void runtime_font_set_composed_glyphs(const RuntimeComposedGlyph *glyphs, size_t count, int cell) {
     pthread_mutex_lock(&lock);
@@ -312,6 +321,14 @@ static ABI int32_t font_open_font_set(Library *library, uint32_t set, uint32_t m
     if (!library || library->magic!=LIBRARY_MAGIC) { if (out) *out=NULL; return ERR_INVALID_LIBRARY; }
     if (!out) return ERR_INVALID_PARAMETER;
     *out=NULL;
+    pthread_mutex_lock(&lock);
+    const int korean=korean_text;
+    pthread_mutex_unlock(&lock);
+    if (korean && set==FONTSET_SST_STD_EUROPEAN_JPCJK) {
+        int32_t result=font_create(library,dcp_noto_sans_kr,(size_t)(dcp_noto_sans_kr_end-dcp_noto_sans_kr),params,out);
+        if (result==FONT_OK) printf("Font: system font set %#x -> built-in Noto Sans KR (Korean text)\n",set);
+        return result;
+    }
     for (size_t i=0;i<sizeof(builtin_sets)/sizeof(*builtin_sets);++i) {
         if (builtin_sets[i].set!=set) continue;
         int32_t result=font_create(library,builtin_sets[i].data,(size_t)(builtin_sets[i].end-builtin_sets[i].data),params,out);

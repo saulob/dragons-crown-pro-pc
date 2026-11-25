@@ -50,6 +50,7 @@ $BuiltInLicenses = [ordered]@{
     'DejaVu'        = 'gpu\third_party\fonts\LICENSE-DejaVu.txt'
     'NotoSans'      = 'third_party\fonts\LICENSE-NotoSans.txt'
     'NotoSansTC'    = 'third_party\fonts\LICENSE-NotoSansTC.txt'
+    'NotoSansKR'    = 'third_party\fonts\LICENSE-NotoSansKR.txt'
     'imgui'         = 'gpu\third_party\imgui\LICENSE.txt'
     'magic_enum'    = 'gpu\third_party\magic_enum\LICENSE'
     'miniz'         = 'gpu\third_party\miniz\LICENSE'
@@ -72,12 +73,12 @@ $AngleLicenceSha256 = ($AnglePin.Files | Where-Object { $_.Name -eq 'LICENSE' })
 $AngleLinkedLicences = @('spirv-tools', 'vulkan-loader', 'VulkanMemoryAllocator', 'xxhash')
 
 $RootFiles = @('dragons_crown_pro.exe', 'trg-updater.exe', 'README.txt', 'LICENSE.txt')
-$AssetFiles = @('assets\launcher\header-art.png', 'assets\launcher\sponsor-heart.png')
+$AssetFiles = @('assets\launcher\header-art.png', 'assets\launcher\home_background.png', 'assets\launcher\sponsor-heart.png')
 $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extracted', 'image', 'sce_sys', 'sce_module',
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
 $ForbiddenPatterns = @('*.pkg', '*.pdb', '*.debug', '*.log', '*.dmp', '*.ini', '*.bin', '*.self', '*.sprx', '*.prx',
     '*.elf', '*.cpk', '*.sfo', '*.json', '*.spv', '*.pipeline_cache', '*.obj', '*.o', '*.a', '*.lib', '*.tmp', '*.bak',
-    '*.sav', '*.py', '*.ps1', '*.c', '*.cpp', '*.h')
+    '*.sav', '*.dat', '*.cache', '*.py', '*.ps1', '*.c', '*.cpp', '*.h')
 # File signatures of PS4 packages, SELF/ELF executables and CRI archives.
 $ForbiddenMagic = @{ '7F434E54' = 'PS4 package'; '4F153D1D' = 'PS4 SELF'; '7F454C46' = 'ELF executable'; '43504B20' = 'CPK archive' }
 
@@ -188,7 +189,7 @@ function Test-ReleaseFolder([string]$Dir) {
             }
         }
     }
-    foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt', 'licenses\NotoSansTC\LICENSE-NotoSansTC.txt')) {
+    foreach ($leaf in $RootFiles + @('licenses\THIRD-PARTY-LICENSES.txt', 'licenses\MSYS2-PACKAGES.txt', 'licenses\NotoSansTC\LICENSE-NotoSansTC.txt', 'licenses\NotoSansKR\LICENSE-NotoSansKR.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $base $leaf) -PathType Leaf)) { $problems.Add("missing: $leaf") }
     }
     foreach ($asset in $AssetFiles) {
@@ -317,7 +318,7 @@ Write-Text (Join-Path $stage 'README.txt') $readme
 Write-Step 'Staging the launcher images'
 $asset_dir = Join-Path $stage 'assets\launcher'
 New-Item -ItemType Directory -Force $asset_dir | Out-Null
-foreach ($image in @('header-art.png', 'sponsor-heart.png')) {
+foreach ($image in @('header-art.png', 'home_background.png', 'sponsor-heart.png')) {
     $source = Join-Path $root "assets\launcher\$image"
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { Stop-Tool "Missing launcher image: $source" }
     Copy-Item -LiteralPath $source $asset_dir

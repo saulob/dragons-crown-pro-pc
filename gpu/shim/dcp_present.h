@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 namespace DcpPresent {
@@ -453,6 +455,304 @@ struct Progress {
 };
 
 inline Progress g_progress;
+
+inline constexpr std::int64_t kStallNotableMs = 500;
+inline constexpr std::int64_t kStallSevereMs = 2000;
+
+constexpr bool ShouldLogCount(std::uint64_t count) {
+    if (count == 0) {
+        return false;
+    }
+    for (std::uint64_t mark = 1; mark <= count; mark *= 10) {
+        if (count == mark) {
+            return true;
+        }
+        if (mark > UINT64_MAX / 10) {
+            break;
+        }
+    }
+    return false;
+}
+
+constexpr const char* StallSeverity(std::int64_t duration_ms) {
+    if (duration_ms >= kStallSevereMs) {
+        return "severe";
+    }
+    if (duration_ms >= kStallNotableMs) {
+        return "notable";
+    }
+    return nullptr;
+}
+
+class StallMonitor {
+public:
+    std::string ObservePipelineStall(std::int64_t now_ms, const char* event,
+                                     std::int64_t duration_ms, std::int64_t driver_ms,
+                                     bool mixed_samples, bool preloading) {
+        const char* severity = StallSeverity(duration_ms);
+        if (!severity) {
+            return {};
+        }
+        last_pipeline_stall_at_ms = now_ms;
+        last_pipeline_stall_duration_ms = duration_ms;
+        last_pipeline_stall_mixed_samples = mixed_samples;
+        const bool is_cache = std::strcmp(event, "pipeline_cache_compile") == 0;
+        auto& counter = is_cache ? cache_stall_count : pipeline_stall_count;
+        auto& severe_counter = is_cache ? cache_severe_count : pipeline_severe_count;
+        const std::uint64_t count = ++counter;
+        const bool severe = duration_ms >= kStallSevereMs;
+        const std::uint64_t severe_count = severe ? ++severe_counter : 0;
+        if (!ShouldLogCount(count) && !(severe && ShouldLogCount(severe_count))) {
+            return {};
+        }
+        char line[320];
+        if (driver_ms >= 0) {
+            std::snprintf(line, sizeof(line),
+                          "GPU stall telemetry: event=%s severity=%s duration_ms=%lld "
+                          "driver_ms=%lld mixed_samples=%s preloading=%s count=%llu",
+                          event, severity, static_cast<long long>(duration_ms),
+                          static_cast<long long>(driver_ms), mixed_samples ? "yes" : "no",
+                          preloading ? "yes" : "no", static_cast<unsigned long long>(count));
+        } else {
+            std::snprintf(line, sizeof(line),
+                          "GPU stall telemetry: event=%s severity=%s duration_ms=%lld "
+                          "mixed_samples=%s count=%llu",
+                          event, severity, static_cast<long long>(duration_ms),
+                          mixed_samples ? "yes" : "no", static_cast<unsigned long long>(count));
+        }
+        return line;
+    }
+
+    std::string ObservePresent(std::int64_t now_ms, std::uint64_t videoout_images,
+                               std::uint32_t swapchain_generation, int last_acquire,
+                               int last_present) {
+        if (!has_present) {
+            has_present = true;
+            last_present_ms = now_ms;
+            last_present_videoout_images = videoout_images;
+            last_present_swapchain_gen = swapchain_generation;
+            return {};
+        }
+        const std::int64_t prev_ms = last_present_ms;
+        const std::int64_t gap_ms = now_ms - prev_ms;
+        const bool source_changed = videoout_images != last_present_videoout_images;
+        const bool swapchain_changed = swapchain_generation != last_present_swapchain_gen;
+        last_present_ms = now_ms;
+        last_present_videoout_images = videoout_images;
+        last_present_swapchain_gen = swapchain_generation;
+
+        const char* severity = StallSeverity(gap_ms);
+        if (!severity) {
+            return {};
+        }
+        const std::uint64_t count = ++present_gap_count;
+        const bool severe = gap_ms >= kStallSevereMs;
+        const std::uint64_t severe_count = severe ? ++present_severe_count : 0;
+        if (!ShouldLogCount(count) && !(severe && ShouldLogCount(severe_count))) {
+            return {};
+        }
+        const std::int64_t correlated_ms = CorrelatedPipelineStallMs(prev_ms, now_ms);
+        char line[384];
+        std::snprintf(line, sizeof(line),
+                      "Presenter telemetry: event=present_gap severity=%s duration_ms=%lld "
+                      "acquire=%s present=%s source_changed=%s swapchain_changed=%s "
+                      "swapchain_gen=%u recent_pipeline_stall_ms=%lld count=%llu",
+                      severity, static_cast<long long>(gap_ms), ResultName(last_acquire),
+                      ResultName(last_present), source_changed ? "yes" : "no",
+                      swapchain_changed ? "yes" : "no", swapchain_generation,
+                      static_cast<long long>(correlated_ms),
+                      static_cast<unsigned long long>(count));
+        return line;
+    }
+
+    std::string ObserveVideoOut(std::int64_t now_ms, std::uint32_t swapchain_generation,
+                                int last_acquire, int last_present) {
+        if (!has_videoout) {
+            has_videoout = true;
+            last_videoout_ms = now_ms;
+            last_videoout_swapchain_gen = swapchain_generation;
+            return {};
+        }
+        const std::int64_t prev_ms = last_videoout_ms;
+        const std::int64_t gap_ms = now_ms - prev_ms;
+        const bool swapchain_changed = swapchain_generation != last_videoout_swapchain_gen;
+        last_videoout_ms = now_ms;
+        last_videoout_swapchain_gen = swapchain_generation;
+
+        const char* severity = StallSeverity(gap_ms);
+        if (!severity) {
+            return {};
+        }
+        const std::uint64_t count = ++videoout_gap_count;
+        const bool severe = gap_ms >= kStallSevereMs;
+        const std::uint64_t severe_count = severe ? ++videoout_severe_count : 0;
+        if (!ShouldLogCount(count) && !(severe && ShouldLogCount(severe_count))) {
+            return {};
+        }
+        const std::int64_t correlated_ms = CorrelatedPipelineStallMs(prev_ms, now_ms);
+        char line[384];
+        std::snprintf(line, sizeof(line),
+                      "Presenter telemetry: event=videoout_gap severity=%s duration_ms=%lld "
+                      "acquire=%s present=%s swapchain_changed=%s swapchain_gen=%u "
+                      "recent_pipeline_stall_ms=%lld count=%llu",
+                      severity, static_cast<long long>(gap_ms), ResultName(last_acquire),
+                      ResultName(last_present), swapchain_changed ? "yes" : "no",
+                      swapchain_generation, static_cast<long long>(correlated_ms),
+                      static_cast<unsigned long long>(count));
+        return line;
+    }
+
+    std::string ObserveGuestSubmit(std::int64_t now_ms, std::uint64_t videoout_images,
+                                   std::uint32_t swapchain_generation) {
+        if (!has_guest_submit) {
+            has_guest_submit = true;
+            last_guest_submit_ms = now_ms;
+            last_guest_videoout_images = videoout_images;
+            last_guest_swapchain_gen = swapchain_generation;
+            return {};
+        }
+        const std::int64_t prev_ms = last_guest_submit_ms;
+        const std::int64_t gap_ms = now_ms - prev_ms;
+        const bool source_changed = videoout_images != last_guest_videoout_images;
+        const bool swapchain_changed = swapchain_generation != last_guest_swapchain_gen;
+        last_guest_submit_ms = now_ms;
+        last_guest_videoout_images = videoout_images;
+        last_guest_swapchain_gen = swapchain_generation;
+
+        const char* severity = StallSeverity(gap_ms);
+        if (!severity) {
+            return {};
+        }
+        const std::uint64_t count = ++guest_submit_gap_count;
+        const bool severe = gap_ms >= kStallSevereMs;
+        const std::uint64_t severe_count = severe ? ++guest_submit_severe_count : 0;
+        if (!ShouldLogCount(count) && !(severe && ShouldLogCount(severe_count))) {
+            return {};
+        }
+        const std::int64_t correlated_ms = CorrelatedPipelineStallMs(prev_ms, now_ms);
+        char line[384];
+        std::snprintf(line, sizeof(line),
+                      "Presenter telemetry: event=guest_submit_gap severity=%s duration_ms=%lld "
+                      "source_changed=%s swapchain_changed=%s swapchain_gen=%u "
+                      "recent_pipeline_stall_ms=%lld count=%llu",
+                      severity, static_cast<long long>(gap_ms), source_changed ? "yes" : "no",
+                      swapchain_changed ? "yes" : "no", swapchain_generation,
+                      static_cast<long long>(correlated_ms),
+                      static_cast<unsigned long long>(count));
+        return line;
+    }
+
+private:
+    std::int64_t CorrelatedPipelineStallMs(std::int64_t window_start_ms,
+                                           std::int64_t window_end_ms) const {
+        if (last_pipeline_stall_duration_ms <= 0) {
+            return 0;
+        }
+        if (last_pipeline_stall_at_ms >= window_start_ms &&
+            last_pipeline_stall_at_ms <= window_end_ms) {
+            return last_pipeline_stall_duration_ms;
+        }
+        return 0;
+    }
+
+    bool has_present = false;
+    std::int64_t last_present_ms = 0;
+    std::uint64_t last_present_videoout_images = 0;
+    std::uint32_t last_present_swapchain_gen = 0;
+    std::uint64_t present_gap_count = 0;
+    std::uint64_t present_severe_count = 0;
+
+    bool has_videoout = false;
+    std::int64_t last_videoout_ms = 0;
+    std::uint32_t last_videoout_swapchain_gen = 0;
+    std::uint64_t videoout_gap_count = 0;
+    std::uint64_t videoout_severe_count = 0;
+
+    bool has_guest_submit = false;
+    std::int64_t last_guest_submit_ms = 0;
+    std::uint64_t last_guest_videoout_images = 0;
+    std::uint32_t last_guest_swapchain_gen = 0;
+    std::uint64_t guest_submit_gap_count = 0;
+    std::uint64_t guest_submit_severe_count = 0;
+
+    std::int64_t last_pipeline_stall_at_ms = 0;
+    std::int64_t last_pipeline_stall_duration_ms = 0;
+    bool last_pipeline_stall_mixed_samples = false;
+    std::uint64_t pipeline_stall_count = 0;
+    std::uint64_t pipeline_severe_count = 0;
+    std::uint64_t cache_stall_count = 0;
+    std::uint64_t cache_severe_count = 0;
+};
+
+inline std::mutex g_stall_mutex;
+inline StallMonitor g_stall_monitor;
+
+inline std::int64_t NowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+inline void RecordPipelineStall(const char* event, std::int64_t duration_ms,
+                                std::int64_t driver_ms, bool mixed_samples, bool preloading) {
+    if (duration_ms < kStallNotableMs) {
+        return;
+    }
+    std::string line;
+    {
+        std::scoped_lock lock{g_stall_mutex};
+        line = g_stall_monitor.ObservePipelineStall(NowMs(), event, duration_ms, driver_ms,
+                                                    mixed_samples, preloading);
+    }
+    if (!line.empty()) {
+        std::printf("%s\n", line.c_str());
+    }
+}
+
+inline void RecordPresent() {
+    const auto now = NowMs();
+    std::string line;
+    {
+        std::scoped_lock lock{g_stall_mutex};
+        line = g_stall_monitor.ObservePresent(
+            now, g_progress.videoout_images.load(std::memory_order_relaxed),
+            g_progress.swapchain_generation.load(std::memory_order_relaxed),
+            g_progress.last_acquire.load(std::memory_order_relaxed),
+            g_progress.last_present.load(std::memory_order_relaxed));
+    }
+    if (!line.empty()) {
+        std::printf("%s\n", line.c_str());
+    }
+}
+
+inline void RecordVideoOut() {
+    const auto now = NowMs();
+    std::string line;
+    {
+        std::scoped_lock lock{g_stall_mutex};
+        line = g_stall_monitor.ObserveVideoOut(
+            now, g_progress.swapchain_generation.load(std::memory_order_relaxed),
+            g_progress.last_acquire.load(std::memory_order_relaxed),
+            g_progress.last_present.load(std::memory_order_relaxed));
+    }
+    if (!line.empty()) {
+        std::printf("%s\n", line.c_str());
+    }
+}
+
+inline void RecordGuestSubmit() {
+    const auto now = NowMs();
+    std::string line;
+    {
+        std::scoped_lock lock{g_stall_mutex};
+        line = g_stall_monitor.ObserveGuestSubmit(
+            now, g_progress.videoout_images.load(std::memory_order_relaxed),
+            g_progress.swapchain_generation.load(std::memory_order_relaxed));
+    }
+    if (!line.empty()) {
+        std::printf("%s\n", line.c_str());
+    }
+}
 
 /// One line for the log before the process stops on VK_ERROR_DEVICE_LOST.
 inline std::string DescribeDeviceLost(const char* where, const Progress& progress) {

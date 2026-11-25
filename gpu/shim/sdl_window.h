@@ -87,6 +87,7 @@ private:
     bool TrackControllerEvent(const SDL_Event& event);
     void RequestExitShortcut(DcpExitEvent route, u32 held_ms);
     void UpdateExitChord();
+    void UpdateHighlightChord();
     unsigned HeldButtons() const;
     bool RightStickMoved(const SDL_Event& event) const;
     void HandleTouch(const SDL_Event& event, bool ui);
@@ -94,6 +95,7 @@ private:
     DcpCursor::State cursor; ///< window thread
     DcpMouseCapture::Tracker mouse_capture; ///< window thread
     DcpExitChord exit_chord{}; ///< window thread: the L1 + R1 + Options hold of each controller
+    std::unordered_map<u32, bool> highlight_chord_down; ///< window thread: the Character Highlight chord of each controller
     DcpExitTelemetry exit_telemetry{}; ///< window thread
     bool mouse_blocked = false; ///< window thread: the last state given to the mouse input
     static constexpr u64 kModeSettleMs = 300;
