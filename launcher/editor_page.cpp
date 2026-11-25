@@ -534,7 +534,7 @@ bool EditorPage::NumberControl(trg::Ui& ui, const char* id, int* value, NumberRa
             drag_press_x_ = ImGui::GetIO().MousePos.x;
             drag_started_ = false;
         }
-        if (ImGui::IsItemActive() && drag_id_ == field_id && !drag_started_) {
+        if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left) && drag_id_ == field_id && !drag_started_) {
             drag_started_ = SliderDragStarted(drag_press_x_, ImGui::GetIO().MousePos.x, scale);
             if (!drag_started_) shown = before;
         }

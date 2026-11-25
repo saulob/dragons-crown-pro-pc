@@ -549,7 +549,7 @@ static void install_text_translation(const char *settings_file, const char *imag
     const int glyph_table=cyrillic ? cyrillic_glyphs_fit(image,size,glyph_pages,cyrillic)
                              : hangul ? hangul_glyphs_fit(image,size,glyph_pages,hangul_glyphs,hangul_count)
                                       : latin_glyphs_fit(image,size,glyph_page);
-    int glyphs_composed=0;
+    int glyphs_composed=0, served=0;
     const char *archive=dcp_text_translation(settings_file,image_dir,app0,&length,&patches,&count,message,sizeof(message),
                                              glyph_table,&glyphs_composed);
     if (archive) {
@@ -563,6 +563,7 @@ static void install_text_translation(const char *settings_file, const char *imag
             if (!overlay_archive(archive,length,patches,count))
                 snprintf(message,sizeof(message),"translation not installed (%s could not be overlaid)",archive);
             else {
+                served=!hangul || glyphs_composed;
                 if (glyphs_composed && cyrillic && !install_cyrillic_glyphs(image,size,glyph_pages,cyrillic))
                     printf("Menu & Subtitles: the Cyrillic letters could not be added to the glyph table\n");
                 if (glyphs_composed && hangul) runtime_font_set_korean(1);
@@ -570,6 +571,11 @@ static void install_text_translation(const char *settings_file, const char *imag
                 default_message_install(image,size,entry,dcp_text_default_bone,dcp_text_native_default_bone,message_stubs,message_stub_bytes);
             }
         }
+    }
+    /* The port's own lines are drawn with the same letters: without the translation they are English like the sheets. */
+    if ((hangul || cyrillic) && !served) {
+        boss_battle_text_set_language("english",0);
+        comms_text_set_language("english",0);
     }
     const char *stage=dcp_text_stage_overlay(&length,&patches,&count);
     if (stage && !overlay_archive(stage,length,patches,count))
@@ -647,8 +653,8 @@ static void install_custom_appearance(const char *image_dir, const char *app0, c
     printf("Appearance runtime: %zu custom character(s)\n",instance_count);
 }
 static void install_character_overrides(const char *build_key, const char *image_dir, const char *user_dir,
-                                        uint8_t *image, uint64_t size, uint64_t entry, uint8_t *stubs,
-                                        size_t stubs_size) {
+                                        uint8_t *image, uint64_t size, uint64_t entry, uint64_t player_update,
+                                        uint8_t *stubs, size_t stubs_size) {
     char message[1024]="";
     const CharacterOverrideEntry *entries=NULL;
     const size_t count=dcp_character_overrides(image_dir,user_dir,&entries,message,sizeof(message));
@@ -656,11 +662,12 @@ static void install_character_overrides(const char *build_key, const char *image
     if (!count || !entries) return;
     printf("Character stat overrides: loaded %zu custom character(s)\n",count);
     CharacterOverrideSites sites;
-    if (!stubs_size || !character_override_hooks_locate(image,size,&sites)) {
+    if (!stubs_size || !player_update || !character_override_hooks_locate(image,size,&sites)) {
         printf("Character override unavailable for %s: stat recalculation sites not found\n",
                build_key && *build_key ? build_key : "unknown");
         return;
     }
+    sites.player_update=player_update;
     character_override_hooks_set_entries(entries,count);
     if (!character_override_hooks_install(image,size,entry,&sites,stubs,stubs_size)) {
         character_override_hooks_set_entries(NULL,0);
@@ -860,7 +867,11 @@ int main(int argc, char **argv) {
         char atlas_table[4200];
         snprintf(atlas_table,sizeof(atlas_table),"%s/atlas-signatures.txt",paths.image_dir);
         character_highlight_set_look_resolver(highlight_look);
-        character_highlight_load_table(atlas_table);
+        if (character_highlight_load_table(atlas_table)<=0 && known_build && !check_imports) {
+            char error[256];
+            if (dcp_build_atlas_signatures(app0,paths.image_dir,error,sizeof(error))) character_highlight_load_table(atlas_table);
+            else printf("Character Highlight: %s\n",error);
+        }
         character_highlight_set_forward(discord_presence ? party_hook_observe_unit : NULL);
         runtime_cheats_set_player_observer(character_highlight_observe_unit);
     }
@@ -1139,7 +1150,7 @@ int main(int argc, char **argv) {
         dcp_resolve_features(known_build ? &game_build : NULL,&view,runtime_cheats_hooks_wanted(1),ultrawide_wanted,&located);
         if (known_build && voice_language!=DCP_VOICE_DEFAULT)
             voice_located=dcp_resolve_voice_language(&game_build,&view,&voice_sites,voice_failure,sizeof(voice_failure));
-        if (known_build && runtime_online_active()) {
+        if (known_build) {
             party_located=dcp_resolve_party(&game_build,&view,&party_sites,party_failure,sizeof(party_failure));
         }
         if (known_build)
@@ -1299,6 +1310,7 @@ int main(int argc, char **argv) {
     }
     if (character_override_stub_area) {
         install_character_overrides(build_key,paths.image_dir,user_dir ? user_dir : "user",image,size,entry,
+                                    party_located ? party_sites.tick : 0,
                                     image+round_page(size)+message_stub_offset+default_message_stub_bytes()+appearance_stub_area+comms_stub_area,
                                     character_override_stub_area);
     }

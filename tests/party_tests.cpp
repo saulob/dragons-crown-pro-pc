@@ -380,7 +380,7 @@ void TestSources() {
     CHECK(Count(loader, "party_hook_install_located") == 1);
     CHECK(loader.find("if (runtime_cheats_hooks_wanted(known_build && game_build.cheats)) {") != std::string::npos);
     CHECK(loader.find("party_located=dcp_resolve_party(&game_build,") != std::string::npos);
-    CHECK(loader.find("if (known_build && runtime_online_active()) {\n            party_located") != std::string::npos);
+    CHECK(loader.find("if (known_build) {\n            party_located") != std::string::npos);
     for (const char* file : {"src/cheat_hooks.cpp", "src/runtime_cheats.cpp", "src/runtime_cheats.h", "src/dcp_cheats.h"}) {
         const std::string text = Source(file);
         CHECK(!text.empty() && text.find("dcp_party.h") == std::string::npos && text.find("party_hook") == std::string::npos);

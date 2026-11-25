@@ -391,7 +391,7 @@ chooses the wording players see.
 | `last_30_days.classes` | Characters in parties, most played first; class appearances in reported parties, not players |
 
 - `lifetime` is additive and always optional: it has no core field, a missing or unreadable value is `null`, and it can
-  never fail the answer. The object keeps a complete lifetime answer for 10 minutes, and the Worker keeps the last good
+  never fail the answer. The object keeps a complete lifetime answer and a complete 30 day answer for 10 minutes, and the Worker keeps the last good
   lifetime values for an hour.
 - Within a section the core fields (`online`, `lobby`, `open_rooms`; `rooms_created`; the three 30-day counts) must be valid
   or the section is `null`. The newer fields (`in_rooms`, `peak_today`, `sessions`, `joins`, `rooms_with_guest`, `classes`)

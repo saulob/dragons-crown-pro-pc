@@ -242,6 +242,9 @@ int dcp_check_renderer(const char *settings_file, char *cause, size_t cause_size
  * success; otherwise 1 and the reason in `error`. */
 int dcp_build_boot_image(const char *app0, const char *out, char *error, size_t error_size);
 
+/* Only the Character Highlight table of that folder, for an image an older version built. 1 when it was written. */
+int dcp_build_atlas_signatures(const char *app0, const char *image_dir, char *error, size_t error_size);
+
 typedef struct {
     const char *label;
     int cheats;                  /* the native cheat hooks are validated for this build */

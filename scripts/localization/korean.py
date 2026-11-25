@@ -37,6 +37,7 @@ FIXES = {
     ('CustomItem', 3996): ('위력 %d의 ', ''),                 # the PS4 line names no power
     ('CustomItem', 3997): ('위력 %d의 ', ''),                 # the PS4 lines name no power
     ('CustomItem', 3998): ('위력 %d의 ', ''),                 # the PS4 lines name no power
+    ('SystemMsg', 80): ('®', '™'),                        # the USA font has no registered sign
     ('SystemMsg', 504): ('@#(53)', '@#(34)'),                 # the right stick is glyph 34 on PS4
     ('SystemMsg', 510): ('@#(53)', '@#(34)'),                 # the right stick is glyph 34 on PS4
     ('SystemMsg', 534): ('@#(53)', '@#(34)'),                 # the right stick is glyph 34 on PS4

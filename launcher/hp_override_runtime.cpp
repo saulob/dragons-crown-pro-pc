@@ -78,6 +78,10 @@ std::vector<CharacterOverrideEntry> PlanCharacterOverrides(const CharacterOverri
             notes.push_back(key.Text() + " has no character identity; left native");
             continue;
         }
+        if (override.Bound() && !override.BelongsTo(item.entry.identity)) {
+            notes.push_back(key.Text() + " now holds another character; left native");
+            continue;
+        }
         planned.push_back(std::move(item));
     }
     std::map<std::vector<uint8_t>, std::vector<size_t>> by_identity;

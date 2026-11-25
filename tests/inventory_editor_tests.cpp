@@ -2828,6 +2828,8 @@ void TestFieldIsolation(const fs::path& base) {
     CHECK(!SliderDragStarted(100.0f, 100.0f, 1.0f) && !SliderDragStarted(100.0f, 103.0f, 1.0f) && !SliderDragStarted(100.0f, 97.5f, 1.0f));
     CHECK(SliderDragStarted(100.0f, 104.0f, 1.0f) && SliderDragStarted(100.0f, 60.0f, 1.0f) && !SliderDragStarted(100.0f, 107.0f, 2.0f) && SliderDragStarted(100.0f, 108.0f, 2.0f));
     const std::string page = ReadText(fs::path(DCP_SOURCE_DIR) / "launcher" / "editor_page.cpp");
+    // The threshold is the mouse's: a keyboard or controller tweak has no pointer travel.
+    CHECK(page.find("ImGui::IsMouseDown(ImGuiMouseButton_Left) && drag_id_ == field_id && !drag_started_") != std::string::npos);
     CHECK(page.find("SliderDragStarted(drag_press_x_") != std::string::npos && page.find("if (!drag_started_) shown = before;") != std::string::npos);
     CHECK(page.find("typed_.Begin(field_id, number_buffer_)") != std::string::npos && page.find("typed_.TakeHanded(field_id)") != std::string::npos);
     CHECK(page.find("editing_number_") == std::string::npos && page.find("press_id_ != field_id") != std::string::npos);

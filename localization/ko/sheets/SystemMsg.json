@@ -81,7 +81,7 @@
     {"index": 77, "source_sha256": "e7cf01672199c41aec1b8bbaa0d395b7faa3279ca67be5cddde74de6c946f306", "ko": "이미 네트워크 게임에 참가 중이어서 접속할 수 없습니다"},
     {"index": 78, "source_sha256": "1f3a82b1b5cf84ff8bdc88a61c75ce4f415bd51a49ad71b61cf2fe88b406da5f", "ko": "대상이 참가자를 받을 수 없는 상태입니다. 접속할 수 없습니다."},
     {"index": 79, "source_sha256": "c811cf38f5622d267352189f5961a1d012cf0c1d3934746bbf72e8a367366e8f", "ko": "해당 유저의 계정으로는 이 애플리케이션의 채팅과 메시지 기능을 이용하실 수 없습니다."},
-    {"index": 80, "source_sha256": "7540e1efb64aaefc501d5e2dcf57204889e81d43b330c9019a0f3047108e9628", "ko": "연령 제한으로 인하여 당신은 이 애플리케이션에서는\nPlayStation®Network의 기능을 이용하실 수 없습니다."},
+    {"index": 80, "source_sha256": "7540e1efb64aaefc501d5e2dcf57204889e81d43b330c9019a0f3047108e9628", "ko": "연령 제한으로 인하여 당신은 이 애플리케이션에서는\nPlayStation™Network의 기능을 이용하실 수 없습니다."},
     {"index": 81, "source_sha256": "77112a12353572e8515fb440fb0c09d437041775935c731b103d66c8f20bb7bd", "ko": "로그아웃되었습니다.\n오프라인 상태이기 때문에 네트워크 플레이 및 타이틀에서\nSaveData의 Upload/Download가 불가능합니다.\n메인 게임에서 다시 온라인 상태로 돌아가려면\n네트워크 메뉴에서 온라인을 활성화하거나 타이틀에서\nSaveData의 Upload/Download를 선택하십시오."},
     {"index": 82, "source_sha256": "442acf9f4a5777f91ee7fb029279d8187f034601785fbfaadc0167aaccdc82d0", "ko": "온라인 상태가 종료되었습니다.\n오프라인 상태이기 때문에 네트워크 플레이 및 타이틀에서\nSaveData의 Upload/Download가 불가능합니다.\n메인 게임에서 다시 온라인 상태로 돌아가려면\n네트워크 메뉴에서 온라인을 활성화하거나 타이틀에서\nSaveData의 Upload/Download를 선택하십시오."},
     {"index": 83, "source_sha256": "0fadd524c1723b99bd40098d5b9fca7a308939055e33061dad13a4dac1042dcb", "ko": "애드혹 상태가 종료되었습니다.\n오프라인 상태이기 때문에\n네트워크 플레이가 불가능합니다.\n메인 게임에서 다시 온라인 상태로 돌아가려면\n네트워크 메뉴에서 애드혹 기능을 활성화하십시오."},

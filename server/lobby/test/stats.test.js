@@ -27,7 +27,10 @@ function online(env, fields = {}, country = 'BR') {
   return client;
 }
 
-const showcase = (env) => env.lobby.showcase();
+const showcase = (env) => {
+  env.lobby.monthMemo = null;
+  return env.lobby.showcase();
+};
 const published = (env) => publicSections(showcase(env));
 const get = (path = STATS_PATH, init = {}) => new Request(`https://dcp-lobby.example${path}`, init);
 
@@ -497,6 +500,20 @@ const sessionLater = (env, account) => {
   assert.equal(again.hello(GAME).code, 'ok');
   again.drop();
 };
+
+test('the 30 day section is read at most once per 10 minutes; an incomplete answer is not kept', () => {
+  const env = makeLobby({ log: () => {} });
+  insertDay(env, 0, { guests: 1, classes: { Elf: 1 } });
+  const first = env.lobby.showcase().last_30_days;
+  insertDay(env, 0, { guests: 1, classes: { Elf: 1 } });
+  assert.deepEqual(env.lobby.showcase().last_30_days, first);
+  env.advance(10 * 60_000);
+  assert.equal(env.lobby.showcase().last_30_days.rooms_with_guest, first.rooms_with_guest + 1);
+  env.lobby.monthMemo = null;
+  env.lobby.metrics.classUsage = () => { throw new Error('unreadable'); };
+  assert.equal(env.lobby.showcase().last_30_days.classes, null);
+  assert.equal(env.lobby.monthMemo, null);
+});
 
 test('lifetime sessions sum every retained day of the dashboard Sessions metric', () => {
   const env = makeLobby();

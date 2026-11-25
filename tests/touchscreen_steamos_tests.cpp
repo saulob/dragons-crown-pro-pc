@@ -824,6 +824,8 @@ void TestWindowSource() {
     CHECK(Pos(window, "DcpTouchRoute::AcceptedTouch(devices[i]") < claim && Pos(window, "LogGamescopeWindow();") < claim);
     const std::size_t destructor = Pos(window, "WindowSDL::~WindowSDL()");
     CHECK(Pos(window, "g_gamescope_touch.Release();", destructor) < Pos(window, "SDL_DestroyWindow(window);", destructor));
+    const std::size_t quit = Pos(window, "case SDL_EVENT_WINDOW_CLOSE_REQUESTED:");
+    CHECK(Pos(window, "g_gamescope_touch.Release();", quit) < Pos(window, "break;", quit));
     const std::size_t lost = Pos(window, "case SDL_EVENT_WINDOW_FOCUS_LOST:");
     CHECK(Pos(window, "g_gamescope_touch.Release();", lost) < Pos(window, "case SDL_EVENT_WINDOW_FOCUS_GAINED:", lost));
     CHECK(Pos(window, "ClaimGamescopeTouch();", Pos(window, "case SDL_EVENT_WINDOW_FOCUS_GAINED:")) <
@@ -854,6 +856,8 @@ void TestWindowSource() {
 
     // The X side is Linux only, loads libX11 on demand, discovers local displays and names no device or path in a log.
     CHECK(Contains(header, "#ifdef __linux__") && Contains(header, "SDL_LoadObject(\"libX11.so.6\")"));
+    // A library without every symbol is dropped, so a later claim never calls through a null one.
+    CHECK(Contains(header, "        SDL_UnloadObject(library_);\n        library_ = nullptr;\n        return false;"));
     CHECK(Contains(header, "/tmp/.X11-unix") && Contains(header, "S_ISSOCK") && Contains(header, "getuid()"));
     CHECK(Contains(header, "DCP_GAMESCOPE_TOUCH_MARKER_ATOM"));
     for (const char* shell : {"xprop", "system(", "popen(", "fork(", "execl", "/dev/input"}) {

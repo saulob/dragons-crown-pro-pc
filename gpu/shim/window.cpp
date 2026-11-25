@@ -808,6 +808,7 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;
             ReleaseMouse();
+            g_gamescope_touch.Release(); // the window thread ends the process: no destructor runs
             break;
         default:
             break;

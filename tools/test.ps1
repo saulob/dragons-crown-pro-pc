@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds and runs the focused headless tests, and prints the supported-build parity summary. It is the gate to pass before
+  Builds and runs the current development focus; with -Full, every suite and the supported-build parity summary, the gate to pass before
   committing parity work: no window, no game launch, no production network (a development lobby on loopback at most).
 .PARAMETER SkipLinux
   Does not run the Linux tests through WSL.
@@ -304,33 +304,6 @@ function Invoke-LinuxLauncherSyntax {
     Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', "$root/tools/test-linux-launcher.sh", $root) $true
 }
 
-function Invoke-LinuxLauncherTests {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --launcher 2>&1") $true
-}
-
-function Invoke-LinuxSteamDeckInputTests {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --steam-deck-input 2>&1") $true
-}
-
-function Invoke-LinuxVulkanPipelineTests {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --vulkan-pipeline 2>&1") $true
-}
-
 function Find-ImagingPython {
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($cmd in @(Get-Command python -All -ErrorAction SilentlyContinue)) {
@@ -371,15 +344,6 @@ function Invoke-PtBrManualVisualChecks {
     @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
 }
 
-function Invoke-LinuxManualVisualTests {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --manual-visual 2>&1") $true
-}
-
 function Invoke-PtBrLocalizationChecks {
     $py = Get-Command python -ErrorAction SilentlyContinue
     if (-not $py) { return Skipped 'python is not installed' }
@@ -391,15 +355,6 @@ function Invoke-PtBrLocalizationChecks {
         if ($r.Code -ne 0) { return @{ Code = $r.Code; Lines = @($out); Hidden = @(); Skip = '' } }
     }
     @{ Code = 0; Lines = @($out); Hidden = @(); Skip = '' }
-}
-
-function Invoke-LinuxLocalizationTests {
-    if ($SkipLinux) { return Skipped 'skipped with -SkipLinux' }
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return Skipped 'WSL is not installed' }
-    $distro = Find-LinuxDistro
-    if (-not $distro) { return Skipped 'no WSL distribution has g++ and the OpenSSL headers' }
-    $root = (& wsl.exe -d $distro --exec wslpath -u $script:RepoRoot | Select-Object -First 1).Trim()
-    Invoke-Native 'wsl.exe' @('-d', $distro, '--exec', 'bash', '-c', "cd '$root' && DCP_TEST_PROGRESS=1 bash tools/build.sh --localization 2>&1") $true
 }
 
 function Invoke-LinuxEditorGate {

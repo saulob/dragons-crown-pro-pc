@@ -8,7 +8,8 @@ namespace dcp {
 namespace {
 
 constexpr uint32_t kMagic = 0x4F484344; // "DCHO"
-constexpr uint32_t kVersion = 2;
+constexpr uint32_t kVersion = 3;
+constexpr uint32_t kVersionNoIdentity = 2;
 constexpr uint32_t kVersionHpOnly = 1;
 constexpr size_t kStoredValues = 7;
 
@@ -170,6 +171,11 @@ void CharacterOverride::Clear(uint16_t field) {
     }
 }
 
+bool CharacterOverride::BelongsTo(std::span<const uint8_t> character_identity) const {
+    return character_identity.size() == identity.size() &&
+           appearance_same_identity(identity.data(), character_identity.data()) != 0;
+}
+
 std::filesystem::path CharacterOverrideStorePath(const std::filesystem::path& user_dir) {
     return user_dir / "character_overrides.dat";
 }
@@ -190,6 +196,10 @@ void SyncCharacterOverrides(CharacterOverrideStore& store, const SaveModel& work
             if (!character.present) continue;
             const CustomKey key{std::string(title_id), std::string(save_dir), slot, index, character.klass};
             CharacterOverride next = store.Get(key).value_or(CharacterOverride{});
+            const std::span<const uint8_t> identity =
+                working.bytes().subspan(character.record_offset + kCharIdentity, kCharIdentityBytes);
+            if (next.Bound() && !next.BelongsTo(identity)) next = CharacterOverride{};
+            std::ranges::copy(identity, next.identity.begin());
             const CharacterView& old = before->characters[index];
             sync(next, CHARACTER_OVERRIDE_MAX_HP, character.hp_max, old.hp_max, true);
             sync(next, CHARACTER_OVERRIDE_STRENGTH, character.stats.strength, old.stats.strength, false);
@@ -214,6 +224,7 @@ std::vector<uint8_t> CharacterOverrideStore::Serialize() const {
         PutText(out, key.Text());
         Put16(out, entry.present);
         for (size_t i = 0; i < kStoredValues; ++i) Put16(out, FieldValue(entry, i));
+        out.insert(out.end(), entry.identity.begin(), entry.identity.end());
     }
     return out;
 }
@@ -225,7 +236,7 @@ bool CharacterOverrideStore::Parse(std::span<const uint8_t> bytes) {
         error_ = "unrecognized character override data";
         return false;
     }
-    if (version != kVersion && version != kVersionHpOnly) {
+    if (version != kVersion && version != kVersionNoIdentity && version != kVersionHpOnly) {
         error_ = "character override file version " + std::to_string(version) + " is not supported";
         return false;
     }
@@ -262,9 +273,15 @@ bool CharacterOverrideStore::Parse(std::span<const uint8_t> bytes) {
                 }
                 if (entry.present & (1u << field)) SetFieldValue(entry, field, value);
             }
-            if (!entry.Any()) {
+            if (!entry.Any() || (entry.Has(CHARACTER_OVERRIDE_MAX_HP) && entry.max_hp == 0)) {
                 error_ = "character override file has a malformed entry";
                 return false;
+            }
+            for (uint8_t& byte : entry.identity) {
+                if (version == kVersion && !in.U8(byte)) {
+                    error_ = "character override file is truncated";
+                    return false;
+                }
             }
         }
         entries.emplace_back(*key, entry);

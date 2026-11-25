@@ -17,6 +17,7 @@ import { STORY_ROLES, STORY_SEEN_PER_ROOM, StoryUsage, storyRole } from './story
 export const PROTOCOL = 1;
 
 const LIFETIME_TTL_MS = 10 * 60_000;
+const MONTH_TTL_MS = 10 * 60_000;
 
 export const LIMITS = {
   frameBytes: 32 * 1024,
@@ -648,6 +649,16 @@ export class Lobby {
     return value;
   }
 
+  // Reads every dimension row of 30 days, so a complete answer is kept for MONTH_TTL_MS.
+  month() {
+    const now = this.host.now();
+    if (this.monthMemo && now - this.monthMemo.at < MONTH_TTL_MS) return this.monthMemo.value;
+    const month = this.metrics.showcaseMonth();
+    const value = { ...month, classes: this.attempt(() => this.metrics.classUsage(month.first, month.last)) };
+    if (value.classes !== null) this.monthMemo = { at: now, value };
+    return value;
+  }
+
   // The public statistics: a section, or an optional value in one, that cannot be read is null, never zero.
   showcase() {
     return {
@@ -658,10 +669,7 @@ export class Lobby {
           peak_today: this.attempt(() => Math.max(this.metrics.todayRow().peak_online, live.online)) };
       }),
       today: this.attempt(() => this.metrics.showcaseToday()),
-      last_30_days: this.attempt(() => {
-        const month = this.metrics.showcaseMonth();
-        return { ...month, classes: this.attempt(() => this.metrics.classUsage(month.first, month.last)) };
-      }),
+      last_30_days: this.attempt(() => this.month()),
       lifetime: this.lifetime(),
     };
   }

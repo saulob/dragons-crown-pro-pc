@@ -13,6 +13,7 @@ extern "C" {
 
 enum {
     CHARACTER_OVERRIDE_HOOK_COUNT = 6,
+    CHARACTER_OVERRIDE_VIRTUAL_UPDATE = 0x28,
     CHARACTER_OVERRIDE_UNIT_CURRENT = 0xb0,
     CHARACTER_OVERRIDE_UNIT_MAX = 0xb4,
     CHARACTER_OVERRIDE_UNIT_STRENGTH = 0xbc,
@@ -69,6 +70,7 @@ typedef struct {
     uint64_t status_stats;
     uint64_t bundle_stats;
     uint64_t effect_stats;
+    uint64_t player_update; /* not located here: the player classes' per-tick update (dcp_resolve_party) */
 } CharacterOverrideSites;
 
 /* 1 when the ApplyLevelStats entry and post tail, the character spawn caller, and the status viewer's HP and stat stores
@@ -87,6 +89,9 @@ void character_override_hooks_set_entries(const CharacterOverrideEntry *entries,
 
 /* The record a unit plays: its party seat's. Replaced in tests. */
 typedef uint64_t (*CharacterOverrideRecordOfUnit)(uint64_t unit);
+/* Enemies run the hooked functions too and keep other data where a player keeps its slot, so only a unit whose class
+ * updates through `address` is looked up. */
+void character_override_hooks_set_player_update(uint64_t address);
 void character_override_hooks_set_record_of_unit(CharacterOverrideRecordOfUnit record_of_unit);
 
 size_t character_override_hooks_stub_bytes(void);

@@ -46,6 +46,9 @@ void character_highlight_observe_local_unit(uint64_t unit);
 void character_highlight_image_registered(uint32_t image, uint64_t guest_address, uint64_t guest_size, uint32_t width,
                                           uint32_t height);
 void character_highlight_image_unregistered(uint32_t image);
+/* The guest wrote new contents into a registered image: the game may load another player's atlas at the same address. */
+void character_highlight_image_refreshed(uint32_t image, uint64_t guest_address, uint64_t guest_size, uint32_t width,
+                                         uint32_t height);
 
 /* Signatures computed so far (images that passed the size and dimension checks), for tests. */
 unsigned character_highlight_hash_count(void);

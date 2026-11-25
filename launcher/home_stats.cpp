@@ -219,7 +219,7 @@ std::optional<DownloadsCache> ReadDownloadsCache(const std::filesystem::path& fi
             continue;
         }
         const std::string key = line.substr(0, equals), value = line.substr(equals + 1);
-        if (value.empty() || value.size() > 19 || value.find_first_not_of("0123456789") != std::string::npos) {
+        if (value.empty() || value.size() > 18 || value.find_first_not_of("0123456789") != std::string::npos) {
             continue;
         }
         try {

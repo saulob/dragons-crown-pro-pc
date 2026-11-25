@@ -195,6 +195,7 @@ static const CharacterOverrideEntry *entries;
 static size_t entry_count;
 static CharacterOverrideRecordOfUnit record_of_unit;
 static _Atomic uint64_t party;
+static uint64_t player_update;
 static _Atomic int logged_max[SEAT_COUNT];
 static _Thread_local uint64_t recalc_unit;
 static _Thread_local int32_t recalc_pre_hp;
@@ -242,6 +243,10 @@ static uint64_t seat_record(uint64_t unit) {
     return seats + PARTY_SEATS + (uint64_t)slot * SEAT_SIZE;
 }
 
+void character_override_hooks_set_player_update(uint64_t address) {
+    player_update = address;
+}
+
 void character_override_hooks_set_entries(const CharacterOverrideEntry *list, size_t count) {
     entries = list;
     entry_count = list ? count : 0;
@@ -269,6 +274,13 @@ const CharacterOverrideEntry *character_override_of_record(uint64_t record) {
     if (!record || !entry_count) return NULL;
     if (guest_i32(record + APPEARANCE_SEAT_OWNER) != APPEARANCE_SEAT_LOCAL) return NULL;
     return character_override_of_status_record(record);
+}
+
+static const CharacterOverrideEntry *override_of_unit(uint64_t unit) {
+    if (!unit || !entry_count || !player_update) return NULL;
+    const uint64_t virtuals = guest_u64(unit);
+    if (!virtuals || guest_u64(virtuals + CHARACTER_OVERRIDE_VIRTUAL_UPDATE) != player_update) return NULL;
+    return character_override_of_record(record_of_unit ? record_of_unit(unit) : seat_record(unit));
 }
 
 void GUEST_HOOK_ABI character_override_pre_recalc(GuestRegs *regs) {
@@ -313,9 +325,7 @@ static void write_effective_stats(uint64_t unit, const CharacterOverrideEntry *o
 }
 
 static void apply_effective_override(uint64_t unit) {
-    if (!unit || !entry_count) return;
-    const uint64_t record = record_of_unit ? record_of_unit(unit) : seat_record(unit);
-    const CharacterOverrideEntry *override = character_override_of_record(record);
+    const CharacterOverrideEntry *override = override_of_unit(unit);
     if (override) write_effective_stats(unit, override);
 }
 
@@ -324,9 +334,7 @@ void GUEST_HOOK_ABI character_override_post_recalc(GuestRegs *regs) {
     const int have_pre = (recalc_unit == unit);
     const int32_t pre_hp = recalc_pre_hp;
     recalc_unit = 0;
-    if (!unit || !entry_count) return;
-    const uint64_t record = record_of_unit ? record_of_unit(unit) : seat_record(unit);
-    const CharacterOverrideEntry *override = character_override_of_record(record);
+    const CharacterOverrideEntry *override = override_of_unit(unit);
     if (!override) return;
     if (override->present & CHARACTER_OVERRIDE_MAX_HP) {
         const int32_t target_max = (int32_t)override->max_hp;
@@ -389,7 +397,7 @@ void GUEST_HOOK_ABI character_override_effect_stats(GuestRegs *regs) {
 int character_override_hooks_install(uint8_t *image, uint64_t size, uint64_t entry, const CharacterOverrideSites *sites,
                                      uint8_t *stubs, size_t stubs_size) {
     if (!sites || !sites->recalc_entry || !sites->recalc_post || !sites->status_max || !sites->status_stats ||
-        !sites->bundle_stats || !sites->effect_stats)
+        !sites->bundle_stats || !sites->effect_stats || !sites->player_update || sites->player_update >= size)
         return 0;
     GuestHook hooks[CHARACTER_OVERRIDE_HOOK_COUNT] = {
         {"character recalc pre", (uint32_t)sites->recalc_entry, kEntryHookLength, {0}, character_override_pre_recalc},
@@ -411,5 +419,6 @@ int character_override_hooks_install(uint8_t *image, uint64_t size, uint64_t ent
         printf("Character override: hook %s not installed: %s\n", hooks[bad].name, guest_hook_status_text(status));
         return 0;
     }
+    player_update = (uint64_t)(uintptr_t)(image + sites->player_update);
     return 1;
 }

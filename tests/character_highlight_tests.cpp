@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "atlas_signatures.h"
+#include "dcp_launcher.h"
 #include "character_highlight.h"
 #include "character_highlight_core.h"
 #include "character_highlight_draw.h"
@@ -238,6 +239,13 @@ void TestGenerator() {
         }
         CHECK(amazon_rows == 2 && fighter_rows == 2);
     }
+    // An image folder from a version without the table gets it at the game start.
+    const fs::path older = base / "older";
+    fs::create_directories(older);
+    char error[128];
+    CHECK(dcp_build_atlas_signatures(game.string().c_str(), older.string().c_str(), error, sizeof(error)) && !*error);
+    CHECK(ReadAll(older / hl::kTableFile) == text);
+    CHECK(!dcp_build_atlas_signatures((base / "none").string().c_str(), (base / "nothing").string().c_str(), error, sizeof(error)) && *error);
     CHECK(text.find(base.string()) == std::string::npos && text.find("FTEX") == std::string::npos);
     CHECK(!fs::exists(out / (std::string(hl::kTableFile) + ".tmp")));
 
@@ -519,6 +527,42 @@ void TestImageCacheCounts() {
     character_highlight_image_registered(5, Address(t.amazon), 4096, 1024, 1024);
     character_highlight_image_registered(5, 0, t.amazon.size(), 1024, 1024);
     CHECK(character_highlight_hash_count() == hashed);
+    // A custom look whose sampled texels equal its native atlas: the image answers for whichever key the player has.
+    const std::string same = BuildFtx(Atlas(1));
+    CHECK(character_highlight_add_custom_atlas("PLAYER/AMAZON00_SAME.FTX", 1, 0, reinterpret_cast<const uint8_t*>(same.data()), same.size()) == 2);
+    std::string shared = t.amazon;
+    character_highlight_image_registered(21, Address(shared), shared.size(), 1024, 1024);
+    BuildParty();
+    g_custom_key[0] = character_highlight_custom_key("PLAYER/AMAZON00_SAME.FTX");
+    SetSeat(0, 1, 0, 0);
+    ObserveAll();
+    CHECK(character_highlight_toggle_local(0) == 0);
+    CHECK(character_highlight_slot_for_image(21) == 0 && character_highlight_slot_for_address(Address(shared)) == 0);
+    SetSeat(1, 1, 0, 1);
+    ObserveAll();
+    CHECK(character_highlight_slot_for_image(21) == -1); // a remote native Amazon wears the same texels
+    CHECK(character_highlight_toggle_local(0) == 0);
+    g_custom_key[0] = CHARACTER_HIGHLIGHT_NATIVE_LOOK;
+    character_highlight_image_unregistered(21);
+
+    // Another player's atlas loaded over the same address is recognized as that atlas, never as the old one.
+    BuildParty();
+    SetSeat(0, 1, 0, 0);
+    ObserveAll();
+    CHECK(character_highlight_toggle_local(0) == 0);
+    std::string reused = t.amazon;
+    character_highlight_image_registered(20, Address(reused), reused.size(), 1024, 1024);
+    CHECK(character_highlight_slot_for_image(20) == 0);
+    std::memcpy(reused.data(), t.elf.data(), reused.size());
+    character_highlight_image_refreshed(20, Address(reused), reused.size(), 1024, 1024);
+    CHECK(character_highlight_slot_for_image(20) == -1 && character_highlight_slot_for_address(Address(reused)) == -1);
+    std::memcpy(reused.data(), t.amazon.data(), reused.size());
+    character_highlight_image_refreshed(20, Address(reused), reused.size(), 1024, 1024);
+    CHECK(character_highlight_slot_for_image(20) == 0);
+    character_highlight_image_unregistered(20);
+    CHECK(character_highlight_slot_for_image(20) == -1 && character_highlight_slot_for_address(Address(reused)) == -1);
+    CHECK(character_highlight_toggle_local(0) == 0);
+
     character_highlight_image_unregistered(7);
     BuildParty();
     SetSeat(0, 1, 0, 0);
@@ -854,7 +898,8 @@ void TestSources() {
           !Contains(loader, "online_query") && !Contains(loader, "highlight_online_active") && !Contains(loader, "character_highlight_configure"));
     CHECK(Contains(Source("launcher/appearance_runtime.cpp"), "character_highlight_add_custom_atlas(instance.entry.c_str()"));
     CHECK(Contains(cache, "character_highlight_image_registered(image_id.index") &&
-          Contains(cache, "character_highlight_image_unregistered(image_id.index);"));
+          Contains(cache, "character_highlight_image_unregistered(image_id.index);") &&
+          Contains(cache, "character_highlight_image_refreshed(image_id.index"));
     CHECK(!Contains(cache, "SilhouetteView") && !Contains(cache, "character_highlight_draw.h"));
 
     const std::string rasterizer = Source("gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp");

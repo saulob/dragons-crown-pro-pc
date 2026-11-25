@@ -14,6 +14,7 @@
 
 #include "appearance_custom.h"
 #include "editor_model.h"
+#include "feature_sites.h"
 #include "hp_override.h"
 #include "hp_override_hooks.h"
 #include "hp_override_runtime.h"
@@ -122,8 +123,17 @@ void WriteAll(const fs::path& path, std::span<const uint8_t> bytes) {
     out.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
 }
 
+constexpr uint64_t kPlayerUpdate = 0x2ea7e0, kEnemyUpdate = 0xdc6e0;
+const std::array<uint64_t, 8> kPlayerVirtuals = {0, 0, 0, 0, 0, kPlayerUpdate};
+const std::array<uint64_t, 8> kEnemyVirtuals = {0, 0, 0, 0, 0, kEnemyUpdate};
+
 struct FakeUnit {
     std::array<uint8_t, 0xb00> mem{};
+    FakeUnit() { SetVirtuals(kPlayerVirtuals); }
+    void SetVirtuals(const std::array<uint64_t, 8>& virtuals) {
+        const uint64_t address = uint64_t(uintptr_t(virtuals.data()));
+        std::memcpy(mem.data(), &address, sizeof(address));
+    }
     int32_t CurrentHp() const { return ReadI32(CHARACTER_OVERRIDE_UNIT_CURRENT); }
     int32_t MaxHp() const { return ReadI32(CHARACTER_OVERRIDE_UNIT_MAX); }
     uint16_t Stat(uint32_t offset) const {
@@ -633,6 +643,28 @@ void TestIsolationIdentityRemoteAndSidecar(const fs::path& root) {
     CHECK(u_remote.Stats() == kNative && u_remote.EffectiveStats() == kNative);
     CHECK(u_unknown.Stats() == kNative && u_unknown.EffectiveStats() == kNative);
 
+    // An enemy whose own data reads as Player 1's slot keeps its stats in every hook.
+    FakeUnit enemy;
+    enemy.SetVirtuals(kEnemyVirtuals);
+    enemy.SetSlot(0);
+    g_test_unit_to_record_unit[3] = enemy.Addr();
+    g_test_unit_to_record_seat[3] = s1.Addr();
+    enemy.SetHp(50, 50);
+    RunNativeRecalc(enemy, 90, kNative);
+    CHECK(enemy.Stats() == kNative && enemy.EffectiveStats() == kNative && enemy.MaxHp() == 90);
+    GuestRegs enemy_regs{};
+    enemy_regs.rbx = enemy_regs.r14 = enemy.Addr();
+    character_override_bundle_stats(&enemy_regs);
+    character_override_effect_stats(&enemy_regs);
+    CHECK(enemy.EffectiveStats() == kNative);
+    enemy.SetVirtuals(kPlayerVirtuals);
+    character_override_bundle_stats(&enemy_regs);
+    CHECK(enemy.EffectiveStats() == local_a);
+    character_override_hooks_set_player_update(0);
+    u1.SetHp(300, 300); RunNativeRecalc(u1, 300, kNative);
+    CHECK(u1.Stats() == kNative);
+    character_override_hooks_set_player_update(kPlayerUpdate);
+
     FakeSavedRecord saved0, saved1, unknown;
     saved0.Init(CharacterClass::kFighter, 0x31);
     saved1.Init(CharacterClass::kFighter, 0x61);
@@ -651,7 +683,7 @@ void TestIsolationIdentityRemoteAndSidecar(const fs::path& root) {
     RunStatusRefresh(viewer, 300, kNative);
     CHECK(viewer.Stats() == kNative);
 
-    // Version 1 HP-only sidecars still load and save as version 2 without losing the HP override.
+    // Version 1 HP-only sidecars still load and save as the current version without losing the HP override.
     const fs::path v1_path = root / "v1" / "character_overrides.dat";
     std::vector<uint8_t> v1 = {0x44, 0x43, 0x48, 0x4F, 1, 0, 0, 0, 1, 0, 0, 0};
     const std::string v1_key = "CUSA10209|SAVEDATA00|0|0|0";
@@ -711,6 +743,70 @@ void TestIsolationIdentityRemoteAndSidecar(const fs::path& root) {
     CHECK(after_rollback.Load() && after_rollback.Get(key1)->strength == 1000);
 
     character_override_hooks_set_entries(nullptr, 0);
+}
+
+// The override follows the character it was made for, not the slot: a new character of the same class in that slot, an
+// import or a restore keeps its native stats.
+void TestOverrideStaysWithItsCharacter(const fs::path& root) {
+    const fs::path user = root / "bound_user";
+    const fs::path save_path = user / "savedata" / "1" / "CUSA10209" / "SAVEDATA00" / "SAVE0.DAT";
+    const CustomKey key{"CUSA10209", "SAVEDATA00", 0, 0, CharacterClass::kFighter};
+    const auto write = [&](const char* name, uint8_t seed) {
+        std::vector<uint8_t> raw = MakeSave();
+        WriteCharacter(raw, 0, 0, name, CharacterClass::kFighter, 9, 300, 300, seed, kNative);
+        FinalizeAndWrite(save_path, raw);
+    };
+    const auto planned = [&] {
+        CharacterOverrideStore store(CharacterOverrideStorePath(user));
+        CHECK(store.Load());
+        std::vector<std::string> notes;
+        return PlanCharacterOverrides(store, DiscoverSaves(user, "CUSA10209"), "CUSA10209", notes);
+    };
+    write("HERO", 0x21);
+    CustomStore custom(CustomStorePath(user));
+    CharacterOverrideStore saved(CharacterOverrideStorePath(user));
+    CHECK(saved.Load());
+    {
+        SaveEdit edit(DiscoverSaves(user, "CUSA10209")[0], BackupFolder(user));
+        CharacterStats stats = kNative;
+        stats.strength = 900;
+        CHECK(edit.working().SetStats(0, 0, stats));
+        CHECK(ApplyEditor(edit, custom, saved, "CUSA10209", "SAVEDATA00").ok());
+    }
+    CHECK(saved.Get(key) && saved.Get(key)->Bound() && planned().size() == 1);
+    write("RENAMED", 0x21);
+    CHECK(planned().size() == 1);
+    write("OTHER", 0x71);
+    CHECK(planned().empty());
+
+    // Editing the replacement drops what belonged to the old character.
+    SaveEdit edit(DiscoverSaves(user, "CUSA10209")[0], BackupFolder(user));
+    CharacterStats stats = kNative;
+    stats.luck = 400;
+    CHECK(edit.working().SetStats(0, 0, stats));
+    CHECK(ApplyEditor(edit, custom, saved, "CUSA10209", "SAVEDATA00").ok());
+    const std::vector<CharacterOverrideEntry> entries = planned();
+    CHECK(entries.size() == 1 && entries[0].present == CHARACTER_OVERRIDE_LUCK && entries[0].luck == 400);
+
+    std::vector<uint8_t> bytes = saved.Serialize();
+    CharacterOverrideStore parsed(root / "unused.dat");
+    CHECK(parsed.Parse(bytes) && parsed == saved);
+    bytes.pop_back();
+    CHECK(!parsed.Parse(bytes));
+    bytes = saved.Serialize();
+    const size_t present_at = 12 + 1 + key.Text().size();
+    bytes[present_at] = CHARACTER_OVERRIDE_MAX_HP;
+    CHECK(!parsed.Parse(bytes)); // a Max HP of zero
+
+    // Version 2 has no identity: it still loads, and the next Apply binds it.
+    std::vector<uint8_t> v2 = saved.Serialize();
+    v2[4] = 2;
+    v2.resize(v2.size() - kCharIdentityBytes);
+    WriteAll(CharacterOverrideStorePath(user), v2);
+    CharacterOverrideStore legacy(CharacterOverrideStorePath(user));
+    CHECK(legacy.Load() && legacy.Get(key) && !legacy.Get(key)->Bound() && planned().size() == 1);
+    SyncCharacterOverrides(legacy, edit.working(), edit.persisted(), "CUSA10209", "SAVEDATA00");
+    CHECK(legacy.Get(key)->Bound() && legacy.Get(key)->luck == 400);
 }
 
 // Minimal PS4 SELF parser to extract the executable PT_LOAD segment from real eboot.bin files.
@@ -832,6 +928,14 @@ void TestNativeExecutableEvidence() {
         CHECK(ContainsPattern(text, kStatusConstitutionSource, sizeof(kStatusConstitutionSource)));
         CHECK(ContainsPattern(text, kStatusMagicResistanceSource, sizeof(kStatusMagicResistanceSource)));
 
+        const DcpExecRange range{0, text.size()};
+        const DcpImageView view{text.data(), text.size(), &range, 1};
+        DcpPartySites party{};
+        DcpLocateReport report{};
+        CHECK(dcp_locate_party_sites(&view, &party, &report));
+        CHECK(party.tick != 0 && party.unit_slot == 0xa70);
+        sites.player_update = party.tick;
+
         const size_t stub_bytes = character_override_hooks_stub_bytes();
         std::vector<uint8_t> combined(text.size() + stub_bytes, 0);
         std::memcpy(combined.data(), text.data(), text.size());
@@ -867,10 +971,12 @@ int main() {
     fs::remove_all(temp, ec);
     fs::create_directories(temp, ec);
 
+    character_override_hooks_set_player_update(kPlayerUpdate);
     TestMaxHpRegressionAndAntiInfiniteHealth(temp);
     TestEveryStatLiveAndStatus(temp);
     TestNameOnlyApplyKeepsNativeAndExisting(temp);
     TestIsolationIdentityRemoteAndSidecar(temp);
+    TestOverrideStaysWithItsCharacter(temp);
     TestNativeExecutableEvidence();
 
     fs::remove_all(temp, ec);

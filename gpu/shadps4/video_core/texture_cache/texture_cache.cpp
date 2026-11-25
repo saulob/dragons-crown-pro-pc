@@ -1128,9 +1128,9 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
     return image.FindView(desc.view_info, false);
 }
 
-void TextureCache::RefreshImage(Image& image) {
+bool TextureCache::RefreshImage(Image& image) {
     if (False(image.flags & ImageFlagBits::Dirty) || image.info.num_samples > 1) {
-        return;
+        return false;
     }
     ResolveReadbacks(image.info.guest_address, image.info.guest_size, true,
                      ReadbackSource::ImageRefresh);
@@ -1154,7 +1154,7 @@ void TextureCache::RefreshImage(Image& image) {
         const u64 hash = XXH3_64bits(addr, size);
         if (image.hash == hash) {
             image.flags &= ~ImageFlagBits::MaybeCpuDirty;
-            return;
+            return false;
         }
         image.hash = hash;
     }
@@ -1202,7 +1202,7 @@ void TextureCache::RefreshImage(Image& image) {
 
     if (image_copies.empty()) {
         image.flags &= ~ImageFlagBits::Dirty;
-        return;
+        return false;
     }
 
     scheduler.EndRendering();
@@ -1215,6 +1215,13 @@ void TextureCache::RefreshImage(Image& image) {
     }
 
     runtime.UploadImage(&image, buffer, image_copies);
+    return true;
+}
+
+void TextureCache::NotifyCpuRefresh(ImageId image_id) {
+    const Image& image = slot_images[image_id];
+    character_highlight_image_refreshed(image_id.index, image.info.guest_address, image.info.guest_size,
+                                        image.info.size.width, image.info.size.height);
 }
 
 vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,

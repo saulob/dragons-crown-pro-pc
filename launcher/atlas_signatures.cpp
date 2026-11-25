@@ -1,10 +1,14 @@
 #include "atlas_signatures.h"
 
+#include <cstdio>
+#include <exception>
 #include <fstream>
 #include <vector>
 
 #include "character_highlight_core.h"
 #include "cpk_patch.h"
+#include "dcp_launcher.h"
+#include "utf8.h"
 
 namespace dcp {
 
@@ -56,3 +60,19 @@ std::string BuildAtlasSignatures(const std::filesystem::path& game, const std::f
 }
 
 } // namespace dcp
+
+extern "C" int dcp_build_atlas_signatures(const char* app0, const char* image_dir, char* error, size_t error_size) {
+    std::string failure;
+    const std::filesystem::path out = dcp::PathFromUtf8(image_dir ? image_dir : "");
+    try {
+        failure = dcp::BuildAtlasSignatures(dcp::PathFromUtf8(app0 ? app0 : ""), out);
+    } catch (const std::exception& e) {
+        failure = e.what();
+    }
+    std::error_code ec;
+    if (failure.empty() && !std::filesystem::is_regular_file(out / dcp::highlight::kTableFile, ec)) {
+        failure = "the game has no player atlases";
+    }
+    if (error && error_size) std::snprintf(error, error_size, "%s", failure.c_str());
+    return failure.empty();
+}

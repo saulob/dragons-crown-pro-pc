@@ -323,6 +323,13 @@ extern "C" void character_highlight_image_registered(uint32_t image, uint64_t gu
     EvaluateLocked();
 }
 
+extern "C" void character_highlight_image_refreshed(uint32_t image, uint64_t guest_address, uint64_t guest_size, uint32_t width,
+                                                    uint32_t height) {
+    if (guest_size < dcp::highlight::kMinAtlasBytes) return;
+    character_highlight_image_unregistered(image);
+    character_highlight_image_registered(image, guest_address, guest_size, width, height);
+}
+
 extern "C" unsigned character_highlight_hash_count(void) {
     std::scoped_lock lock{g_mutex};
     return g_hashes;
@@ -339,13 +346,18 @@ extern "C" void character_highlight_image_unregistered(uint32_t image) {
 
 namespace {
 
-int SlotForKey(int key, unsigned enabled) {
-    if (key == kNoKey) return -1;
+// Over every atlas an image matches: a custom look can keep the sampled texels of its native atlas.
+template <typename Matches>
+int SlotForMatches(unsigned enabled, Matches matches) {
     unsigned local = 0;
     bool remote = false;
-    for (int slot = 0; slot < kPlayers; ++slot) {
-        if (g_local_key[slot].load(std::memory_order_relaxed) == key) local |= 1u << slot;
-        remote |= g_remote_key[slot].load(std::memory_order_relaxed) == key;
+    for (const MatchSlot& match : g_matches) {
+        if (!matches(match)) continue;
+        const int key = static_cast<int>(match.atlas.load(std::memory_order_relaxed) & dcp::highlight::kKeyMaskValue);
+        for (int slot = 0; slot < kPlayers; ++slot) {
+            if (g_local_key[slot].load(std::memory_order_relaxed) == key) local |= 1u << slot;
+            remote |= g_remote_key[slot].load(std::memory_order_relaxed) == key;
+        }
     }
     if (local == 0) return -1;
     if (remote || (local & (local - 1))) {
@@ -355,32 +367,20 @@ int SlotForKey(int key, unsigned enabled) {
     return (local & enabled) ? __builtin_ctz(local) : -1;
 }
 
-int KeyForImage(uint32_t image) {
-    for (const MatchSlot& slot : g_matches) {
-        if (slot.image_plus_one.load(std::memory_order_relaxed) == image + 1) {
-            return static_cast<int>(slot.atlas.load(std::memory_order_relaxed) & dcp::highlight::kKeyMaskValue);
-        }
-    }
-    return kNoKey;
-}
-
 } // namespace
 
 extern "C" int character_highlight_slot_for_image(uint32_t image) {
     const unsigned enabled = g_enabled_mask.load(std::memory_order_relaxed);
     if (enabled == 0) return -1;
-    return SlotForKey(KeyForImage(image), enabled);
+    return SlotForMatches(enabled, [image](const MatchSlot& match) {
+        return match.image_plus_one.load(std::memory_order_relaxed) == image + 1;
+    });
 }
 
 extern "C" int character_highlight_slot_for_address(uint64_t guest_address) {
     const unsigned enabled = g_enabled_mask.load(std::memory_order_relaxed);
     if (enabled == 0 || guest_address == 0) return -1;
-    for (const MatchSlot& slot : g_matches) {
-        if (slot.address.load(std::memory_order_relaxed) == guest_address) {
-            return SlotForKey(
-                static_cast<int>(slot.atlas.load(std::memory_order_relaxed) & dcp::highlight::kKeyMaskValue),
-                enabled);
-        }
-    }
-    return -1;
+    return SlotForMatches(enabled, [guest_address](const MatchSlot& match) {
+        return match.address.load(std::memory_order_relaxed) == guest_address;
+    });
 }

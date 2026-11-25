@@ -135,7 +135,12 @@ private:
         change_ = Load<ChangeFn>("XChangeProperty");
         free_ = Load<FreeFn>("XFree");
         flush_ = Load<FlushFn>("XFlush");
-        return open_ && intern_ && default_root_ && close_ && get_ && change_ && free_ && flush_;
+        if (open_ && intern_ && default_root_ && close_ && get_ && change_ && free_ && flush_) {
+            return true;
+        }
+        SDL_UnloadObject(library_);
+        library_ = nullptr;
+        return false;
     }
 
     template <typename Fn>

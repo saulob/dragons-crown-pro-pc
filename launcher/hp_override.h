@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -25,7 +26,10 @@ struct CharacterOverride {
     uint16_t intelligence = 0;
     uint16_t magic_resistance = 0;
     uint16_t luck = 0;
+    std::array<uint8_t, kCharIdentityBytes> identity{}; // whose overrides these are; zero in files before version 3
 
+    bool Bound() const { return identity != std::array<uint8_t, kCharIdentityBytes>{}; }
+    bool BelongsTo(std::span<const uint8_t> character_identity) const;
     bool Has(uint16_t field) const { return (present & field) != 0; }
     bool Any() const { return present != 0; }
     uint16_t Value(uint16_t field) const;

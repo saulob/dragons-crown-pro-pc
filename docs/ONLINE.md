@@ -356,16 +356,21 @@ Android rooms that **used relay**, meaning the relay carried at least one frame 
   country.
 - A session is a sign-in of the launcher or the game to the online service that has no counted sign-in of the same
   account in the previous 10 minutes, so a quick reconnect is not counted again and sessions are not a number of players.
-  There is no unique-player count for these statistics.
+  The only count of players is the total number of registered accounts, read from the account table; there is no
+  per-day or per-player count.
 - The one exception is Early Story Online. The online service keeps, for each account that hosted or joined an Early Story
   Online room, its online name, its account id, how many such rooms it took part in as host and as guest, and when it last
   did. It exists so the maintainer can see who uses the feature; it holds no address, endpoint, room or join code, only the
   maintainer sees it on the same private page, and merely turning the option on records nothing. The game sends nothing
   extra for it: it comes from the room requests the game already makes.
 - Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Saves, character names, levels, equipment, gold,
-  progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below, the game sends nothing
+  progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below and
+  the host character's difficulty in the request that creates a room, kept only as a count per day, the game sends nothing
   extra for these statistics: they come from the sign-in and room requests it already makes.
-- Only the maintainer can see them, on a private, password-protected page of the online service.
+- A few totals are public (`GET /stats`, server/lobby/README.md): players online, in rooms and in the Lobby, open rooms, the
+  day's and the last 30 days' rooms, joins and sessions, the classes in reported parties, and the sessions and accounts
+  since the start. The launcher's Home page reads them and GitHub's download count, also while Online Play is off, without
+  an account or identifier. Everything else is seen only by the maintainer, on a private, password-protected page.
 
 The online service itself still needs your account, Online name, friends and, while you are in a room, your address and
 port to connect you to other players; that is described below and is not part of these statistics.
