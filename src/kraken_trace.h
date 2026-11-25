@@ -21,6 +21,9 @@ inline constexpr uint32_t kOwnerUnitOffset = 0x9b8;
 // A tentacle's weak reference to its mast and the mast's broken flag, as laid out in CUSA10454 1.00.
 inline constexpr uint32_t kTentacleMastOffset = 0x38d8;
 inline constexpr uint32_t kMastBrokenOffset = 0x38c1;
+// Set in the owner while the game holds the part at 1 HP. An arm goes down, which exposes the body, only at exactly 1.
+inline constexpr uint32_t kOwnerStateOffset = 0x7fc;
+inline constexpr int32_t kOwnerCannotDie = 0x2000;
 inline constexpr size_t kNameBytes = 24;
 inline constexpr size_t kMaxParts = 32;
 inline constexpr int64_t kSampleIntervalMs = bosstrace::kSampleIntervalMs;
@@ -62,6 +65,11 @@ inline constexpr PartClass kPartClasses[] = {
     {Part::Tentacle, "DcKrakenTentacle", "Tentacle"},
     {Part::Mast, "DcKrakenTentacleMast", "Mast"},
 };
+
+template <typename Memory>
+bool CannotDie(const Memory& memory, uint64_t owner) {
+    return (memory.S32(owner + kOwnerStateOffset) & kOwnerCannotDie) != 0;
+}
 
 constexpr const char* PartLabel(Part part) {
     for (const PartClass& entry : kPartClasses) {
@@ -163,6 +171,12 @@ public:
         return ReadClass(memory, name);
     }
 
+    // The lowest HP a hit may leave a Kraken part with; 0 for every other target.
+    template <typename Memory>
+    int32_t HpFloor(const Memory& memory, uint64_t owner) const {
+        return Identify(memory, owner) != Part::None && CannotDie(memory, owner) ? 1 : 0;
+    }
+
     bool Tracking() const { return engaged_; }
 
     // A hit on a Kraken part, before the game lowers its HP. The hit check calls this too, with `lethal_check` set.
@@ -191,7 +205,7 @@ public:
                 tracked->biggest = amount;
             }
         }
-        if (lethal_check && hp > 0 && tracked->lethal_since_ms == 0 &&
+        if (lethal_check && hp > 0 && tracked->lethal_since_ms == 0 && !CannotDie(memory, owner) &&
             static_cast<int64_t>(hp) <= static_cast<int64_t>(amount) * multiplier) {
             tracked->lethal_since_ms = now == 0 ? 1 : now;
             Line(now, Event::LethalCheck, tracked, "hp=%d hit=%d dmgx=%d native_lethal=%d", hp, amount, multiplier,

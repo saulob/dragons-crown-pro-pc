@@ -3721,6 +3721,21 @@ void TestDamageMultiplier() {
     CHECK(MultipliedHpBeforeHit(2, UnitKind::Other, INT32_MAX, INT32_MAX) == INT32_MAX);
     CHECK(MultipliedHpBeforeHit(100, UnitKind::Other, 1000000, 9999) == 1000000 - 9999 * 99);
 
+    // A target the game holds at 1 HP: the hit stops there and is never the lethal one.
+    bool held = true;
+    for (const int multiplier : {1, 2, 5, 10, 100}) {
+        for (const int32_t hp : {1, 2, 3, 99, 100, 200, 5000, INT32_MAX}) {
+            for (const int32_t attack : {1, 2, 22, 199, 200, 201, 1000000, INT32_MAX}) {
+                const int32_t amount = std::min(attack, hp - 1);
+                const int64_t wanted = std::max<int64_t>(1, int64_t(hp) - int64_t(amount) * multiplier);
+                const int32_t before = MultipliedHpBeforeHit(multiplier, UnitKind::Other, hp, amount, 1);
+                const int32_t hit = DamageAboveFloor(MultipliedDamage(multiplier, UnitKind::Other, amount), amount, hp, 1);
+                held = held && int64_t(before) - amount == wanted && before <= hp && hit < hp && hit >= amount;
+            }
+        }
+    }
+    CHECK(held && DamageAboveFloor(500, 50, 100, 0) == 500 && DamageAboveFloor(500, 200, 100, 1) == 200);
+
     // The game's rules after the hooks, against the policy: HP ends at max(0, hp - amount * multiplier), the hit that
     // empties HP is the one the lethal check calls lethal, and that hit crosses from above 0 to 0 itself.
     bool consistent = true;
@@ -4575,6 +4590,182 @@ void TestKrakenTrace() {
     SetGuestFunctions({nullptr, nullptr});
 }
 
+// Issue #86: the game's own rules around a hit on a Kraken part, as in the damage calculation 0xe6230, the hit check
+// 0x29dcb0, the damage function 0xd8360 and the arms' update 0x23da40.
+struct KrakenFight {
+    static constexpr uint32_t kOwnerFlags = 0x7fc, kCannotDie = 0x2000, kOwnerState = 0x103;
+    static constexpr uint8_t kArmDown = 0xa1;
+    struct Outcome {
+        int32_t loss = 0;
+        bool lethal = false, death = false;
+    };
+
+    KrakenWorld kraken;
+    FakeGame body{false, 0}, mouth{false, 0}, defense_l{false, 0}, defense_r{false, 0}, attack_l{false, 0}, attack_r{false, 0},
+        rock{false, 0}, tentacle{false, 0}, mast{false, 0}, goblin{false, 0}, chimera{false, 0};
+
+    KrakenFight() {
+        const TraceWorld& world = kraken.world;
+        world.Name(body, KrakenWorld::kBody);
+        world.Name(mouth, KrakenWorld::kMouth);
+        for (FakeGame* arm : {&defense_l, &defense_r}) world.Name(*arm, KrakenWorld::kDefense);
+        for (FakeGame* arm : {&attack_l, &attack_r}) world.Name(*arm, KrakenWorld::kAttack);
+        world.Name(rock, KrakenWorld::kRock);
+        world.Name(tentacle, KrakenWorld::kTentacle);
+        world.Name(mast, KrakenWorld::kMast);
+        world.Name(goblin, TraceWorld::kGoblin);
+        world.Name(chimera, TraceWorld::kChimera);
+        for (FakeGame* part : {&mouth, &defense_l, &defense_r, &attack_l, &attack_r, &mast}) CannotDie(*part, true);
+        for (FakeGame* arm : {&defense_l, &defense_r, &attack_l, &attack_r}) SetHp(*arm, 1000);
+        SetHp(body, 1000000);
+    }
+
+    static void CannotDie(FakeGame& part, bool held) {
+        FakeGame::Store<uint32_t>(part.owner + kOwnerFlags, held ? kCannotDie | 1u : 1u);
+    }
+    static bool HeldAlive(const FakeGame& part) {
+        return (FakeGame::Load<uint32_t>(part.owner + kOwnerFlags) & kCannotDie) != 0;
+    }
+    static bool Down(const FakeGame& arm) { return arm.owner[kOwnerState] == kArmDown; }
+    bool BodyExposed() const { return Down(defense_l) && Down(defense_r); }
+
+    Outcome Hit(FakeGame& part, int32_t attack) {
+        Outcome outcome;
+        if (&part == &body && !BodyExposed()) {
+            return outcome;
+        }
+        const int32_t hp = Hp(part);
+        const int32_t amount = std::min(attack, hp - (HeldAlive(part) ? 1 : 0));
+        GuestRegs check{};
+        check.rax = static_cast<uint32_t>(amount);
+        check.r15 = part.Owner();
+        LethalCheckHook(&check);
+        outcome.lethal = hp <= static_cast<int32_t>(check.rax);
+        GuestRegs damage = part.DamageRegs(amount);
+        HealthDamageHook(&damage);
+        CHECK(static_cast<int32_t>(damage.rcx) == amount); // the damage number
+        const int32_t before = Hp(part), after = before - static_cast<int32_t>(damage.rcx);
+        outcome.death = before > 0 && after <= 0;
+        SetHp(part, std::max(after, 0));
+        outcome.loss = hp - Hp(part);
+        UpdateArms(defense_l, attack_l);
+        UpdateArms(defense_r, attack_r);
+        return outcome;
+    }
+
+    static void UpdateArms(FakeGame& defense, FakeGame& attack) {
+        if ((Hp(defense) == 1 && !Down(defense)) || (Hp(attack) == 1 && !Down(attack))) {
+            defense.owner[kOwnerState] = attack.owner[kOwnerState] = kArmDown;
+        }
+    }
+};
+
+void TestKrakenDamageMultiplier() {
+    for (const int multiplier : {1, 2, 5, 10, 100}) {
+        runtime_cheats_start(0, 1, 1, 100, multiplier);
+        const auto fight = std::make_unique<KrakenFight>();
+        KrakenStart(fight->kraken, true);
+
+        // The arms take the multiplied loss down to the 1 HP the game holds them at, which lowers them and exposes the body.
+        CHECK(fight->Hit(fight->body, 50).loss == 0);
+        for (FakeGame* arm : {&fight->defense_l, &fight->defense_r}) {
+            int hits = 0;
+            while (Hp(*arm) > 1 && hits < 100) {
+                const int32_t hp = Hp(*arm);
+                const KrakenFight::Outcome outcome = fight->Hit(*arm, 37);
+                CHECK(outcome.loss == std::min(37 * multiplier, hp - 1) && !outcome.lethal && !outcome.death);
+                ++hits;
+            }
+            CHECK(Hp(*arm) == 1 && KrakenFight::Down(*arm) && hits == (999 + 37 * multiplier - 1) / (37 * multiplier));
+            CHECK(fight->Hit(*arm, 37).loss == 0 && Hp(*arm) == 1);
+        }
+        CHECK(fight->BodyExposed() && KrakenFight::Down(fight->attack_l) && KrakenFight::Down(fight->attack_r));
+        CHECK(TraceCount("event=lethal_check") == 0);
+
+        // The exposed body takes exactly the multiplied loss.
+        const KrakenFight::Outcome body = fight->Hit(fight->body, 50);
+        CHECK(body.loss == 50 * multiplier && !body.lethal && !body.death);
+
+        // A phase that holds the body alive ends at exactly 1 HP; without the hold it dies through the game's own hit.
+        KrakenFight::CannotDie(fight->body, true);
+        SetHp(fight->body, 90);
+        const KrakenFight::Outcome held = fight->Hit(fight->body, 500);
+        CHECK(held.loss == 89 && Hp(fight->body) == 1 && !held.lethal && !held.death);
+        KrakenFight::CannotDie(fight->body, false);
+        SetHp(fight->body, 50 * multiplier);
+        const KrakenFight::Outcome killed = fight->Hit(fight->body, 50);
+        CHECK(Hp(fight->body) == 0 && killed.lethal && killed.death);
+
+        // Every other part, held alive and not.
+        for (FakeGame* part : {&fight->mouth, &fight->attack_l, &fight->rock, &fight->tentacle, &fight->mast}) {
+            for (const bool hold : {true, false}) {
+                KrakenFight::CannotDie(*part, hold);
+                SetHp(*part, 100000);
+                const KrakenFight::Outcome first = fight->Hit(*part, 22);
+                CHECK(first.loss == 22 * multiplier && !first.lethal && !first.death);
+                SetHp(*part, 22 * multiplier);
+                const KrakenFight::Outcome last = fight->Hit(*part, 22);
+                CHECK(Hp(*part) == (hold ? 1 : 0) && last.lethal == !hold && last.death == !hold);
+            }
+        }
+
+        // Ordinary enemies and other bosses keep the multiplier's rule.
+        for (FakeGame* other : {&fight->goblin, &fight->chimera}) {
+            SetHp(*other, 100000);
+            CHECK(fight->Hit(*other, 22).loss == 22 * multiplier);
+            SetHp(*other, 22 * multiplier);
+            const KrakenFight::Outcome last = fight->Hit(*other, 22);
+            CHECK(Hp(*other) == 0 && last.lethal && last.death);
+            KrakenFight::CannotDie(*other, true);
+            SetHp(*other, 100);
+            GuestRegs regs = other->DamageRegs(99);
+            HealthDamageHook(&regs);
+            CHECK(Hp(*other) == (multiplier == 1 ? 100 : 99));
+        }
+    }
+
+    // Online Play locks the multiplier Off in the same fight.
+    runtime_cheats_set_online(1);
+    runtime_cheats_start(0, 1, 1, 100, 100);
+    const auto fight = std::make_unique<KrakenFight>();
+    KrakenStart(fight->kraken, true);
+    CHECK(fight->Hit(fight->defense_l, 37).loss == 37);
+    runtime_cheats_set_online(0);
+
+    runtime_cheats_start(0, 1, 1, 100, 1);
+    g_trace_lines.clear();
+    ConfigureKrakenTrace(0, 0, false, nullptr);
+    ConfigureBossTrace(0, 0, nullptr);
+    SetGuestFunctions({nullptr, nullptr});
+}
+
+// The game code the rules above stand on, in every local boot image.
+void CheckKrakenDamageImage(const std::vector<uint8_t>& image) {
+    const std::vector<int> floor = {0x48, 0x8d, 0x0d, -1, -1, -1, -1, 0x8b, 0x49, 0x34, 0x41, 0x85, 0x8e, 0xfc, 0x07, 0x00, 0x00};
+    const std::vector<int> capped = {0xc5, 0xfa, 0x10, 0x45, 0xa4, 0xf6, 0xc3, 0x40, 0xc5, 0xfa, 0x5c, 0x45, 0xa8};
+    const std::vector<int> arm_down = {0x83, 0xbf, 0xb0, 0x00, 0x00, 0x00, 0x01, 0x75, -1,   0x48, 0x8b, 0x9f, 0xe0, 0x01, 0x00,
+                                       0x00, 0x80, 0xbb, 0x03, 0x01, 0x00, 0x00, 0xa1, 0x74, -1,   0xbe, 0xeb, 0x13, 0x00, 0x00};
+    const std::vector<int> body_exposed = {0x48, 0x8b, 0xb3, 0x10, 0x39, 0x00, 0x00, 0x48, 0x85, 0xf6, 0x74, -1,   0x80, 0xbe,
+                                           0x03, 0x01, 0x00, 0x00, 0xa1, 0x75, -1,   0x48, 0x8b, 0xb3, 0x30, 0x39, 0x00, 0x00,
+                                           0x48, 0x85, 0xf6, 0x74, -1,   0x80, 0xbe, 0x03, 0x01, 0x00, 0x00, 0xa1, 0x74, -1};
+    const std::vector<int> defense_held = {0x09, 0xd1, 0x48, 0xc1, 0xea, 0x20, 0x09, 0xf0, 0x48, 0xc1, 0xee, 0x20, 0x41, 0x0b, 0x46, 0x34};
+    const std::vector<int> attack_held = {0x40, 0x80, 0xc6, 0x61, 0x8b, 0x83, 0xfc, 0x07, 0x00, 0x00, 0x8b, 0x8b,
+                                          0xf8, 0x07, 0x00, 0x00, 0x41, 0x0b, 0x46, 0x34, 0x41, 0x0b, 0x4e, 0x0c};
+    CHECK(FindPattern(image, capped).size() == 1 && FindPattern(image, arm_down).size() == 2);
+    CHECK(FindPattern(image, body_exposed).size() == 1);
+    CHECK(FindPattern(image, defense_held).size() == 1 && FindPattern(image, attack_held).size() == 1);
+    const std::vector<size_t> tested = FindPattern(image, floor);
+    CHECK(tested.size() == 1);
+    if (tested.size() == 1) {
+        int32_t disp;
+        std::memcpy(&disp, image.data() + tested[0] + 3, 4);
+        const size_t at = tested[0] + 7 + disp + 0x34;
+        uint32_t bit = 0;
+        if (at + 4 <= image.size()) std::memcpy(&bit, image.data() + at, 4);
+        CHECK(bit == KrakenFight::kCannotDie);
+    }
+}
+
 // The sites the trace and the report stand on, in every local boot image: the tentacle's unguarded read of its mast
 // handle, and the class names the constructors store.
 void CheckKrakenImage(const std::string& label, const std::vector<uint8_t>& image) {
@@ -4616,12 +4807,14 @@ void TestKrakenImages() {
         std::vector<uint8_t> image;
         if (ReadBootImage(fs::path(DCP_SOURCE_DIR) / "build" / "image" / folder / "boot.bin", &image)) {
             CheckKrakenImage(folder, image);
+            CheckKrakenDamageImage(image);
             ++checked;
         }
     }
     std::vector<uint8_t> update;
     if (ReadBootImage(fs::path(DCP_SOURCE_DIR) / "build" / "research" / "image" / "CUSA10454-1.01" / "boot.bin", &update)) {
         CheckKrakenImage("CUSA10454-1.01", update);
+        CheckKrakenDamageImage(update);
         ++checked;
     }
     std::printf("kraken trace: %d local boot images checked\n", checked);
@@ -4657,7 +4850,10 @@ int main(int argc, char** argv) {
     TestBossTrace();
     TestBossTraceImages();
     TestKrakenTrace();
+    const int failures_before = g_failures;
+    TestKrakenDamageMultiplier();
     TestKrakenImages();
+    std::printf("GROUP|issue86-kraken-damage|%s\n", g_failures == failures_before ? "PASS" : "FAIL");
     TestDurability();
     TestLocalMultiplayer();
     TestSeatOwnership();

@@ -45,10 +45,9 @@
   saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
   The normal run includes both.
 .DESCRIPTION
-  The default run is the current focus, V6H2K (launcher startup visual state): the Home statistics and their caches, the launcher
-  startup order and source contract, the renderer fallback and presentation groups, the Vulkan probe scenarios and the graphics card
-  list (dcp-launcher-tests, dcp-launcher-startup-tests), the updater's network behaviour (dcp-update-network-tests) and the
-  launcher static gate. Every other group stays under -Full.
+  The default run is the current focus, K8R3M (issue #86, Kraken Damage Multiplier): the cheat tests with the Kraken damage group
+  (dcp-cheats-tests), the Kraken null mast fix (dcp-kraken-fix-tests) and the hook locators (dcp-feature-sites-tests). Every other
+  group stays under -Full.
 
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -480,14 +479,11 @@ $tests = @(
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'V6H2K launcher startup visual state'
-$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-launcher-startup-tests', 'dcp-update-network-tests')
+$defaultFocusName = 'K8R3M issue #86 Kraken Damage Multiplier'
+$defaultFocusSuites = @('dcp-cheats-tests', 'dcp-kraken-fix-tests', 'dcp-feature-sites-tests')
 # The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
 $defaultFocusGroups = [ordered]@{
-    'dcp-launcher-tests home-startup'  = @('GROUP|launcher-home-startup|PASS')
-    'dcp-launcher-tests startup'       = @('GROUP|launcher-startup|PASS')
-    'dcp-launcher-tests renderer'      = @('GROUP|launcher-renderer|PASS')
-    'dcp-launcher-startup-tests logic' = @('GROUP|launcher-startup-logic|PASS')
+    'dcp-cheats-tests' = @('GROUP|issue86-kraken-damage|PASS')
 }
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
@@ -552,17 +548,9 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'Home statistics and startup order (caches before the first frame, placeholders, refresh, updater independence)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests home-startup' -Arguments @('home-startup'))
-        (Test-Step 'launcher startup source contract (renderer, Show, Vulkan probe order)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests startup' -Arguments @('startup'))
-        (Test-Step 'launcher renderer and presentation' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests renderer' -Arguments @('renderer'))
-        (Test-Step 'launcher startup without Vulkan (renderer fallback, recovery option, Vulkan probe scenarios, graphics card list, probe timing)' 'dcp-launcher-startup-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-startup-tests logic')
-        ($tests | Where-Object { $_.Exe -eq 'dcp-update-network-tests' })
-        (Test-Step 'launcher static gate (source hygiene, TRG patch chain, compiler warnings, Windows and Linux syntax-only compiles)' -Script 'tests\launcher_gate_tests.ps1' -Capture `
-            -Arguments (@('-BuildDir', $buildDir) + @(if ($SkipLinux) { '-SkipLinux' })))
+        (Test-Step 'cheat tests (issue #86: Damage Multiplier on every Kraken part, generic enemies, Chimera, hook tables)' 'dcp-cheats-tests' -Capture -Quiet `
+            -Key 'dcp-cheats-tests')
+        ($tests | Where-Object { $_.Exe -in 'dcp-kraken-fix-tests', 'dcp-feature-sites-tests' })
     )
     $requiredSuites = $defaultFocusSuites
 }

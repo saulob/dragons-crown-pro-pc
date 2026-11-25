@@ -517,15 +517,24 @@ constexpr int32_t MultipliedDamage(int multiplier, UnitKind kind, int32_t amount
     return amount * multiplier;
 }
 
+// A multiplied hit on a target the game holds at `floor` HP goes no further than the floor; 0 is no floor.
+constexpr int32_t DamageAboveFloor(int32_t multiplied, int32_t amount, int32_t hp, int32_t floor) {
+    if (floor <= 0 || multiplied <= hp - floor) {
+        return multiplied;
+    }
+    return amount > hp - floor ? amount : hp - floor;
+}
+
 // The HP to give the target just before the game subtracts its own hit, so the hit itself lowers HP to
-// hp - amount * multiplier and, when that is 0 or less, is still the hit that crosses from above 0 to 0.
-constexpr int32_t MultipliedHpBeforeHit(int multiplier, UnitKind kind, int32_t hp, int32_t amount) {
+// hp - amount * multiplier and, when that is `floor` or less, is still the hit that takes it there.
+constexpr int32_t MultipliedHpBeforeHit(int multiplier, UnitKind kind, int32_t hp, int32_t amount, int32_t floor = 0) {
     if (multiplier <= kDamageMultiplierOff || kind != UnitKind::Other || amount <= 0 || hp <= 0) {
         return hp;
     }
     const int64_t loss = static_cast<int64_t>(amount) * multiplier;
-    if (loss >= hp) {
-        return amount < hp ? amount : hp;
+    const int32_t limit = hp - floor;
+    if (loss >= limit) {
+        return amount < limit ? floor + amount : hp;
     }
     return static_cast<int32_t>(hp - (loss - amount));
 }

@@ -173,14 +173,14 @@ bool HitWritesHp(const GuestRegs* regs) {
     return message > -1.0f && message < 1.0f;
 }
 
-// Lowers HP so the game's own, unchanged hit takes it to hp - amount * multiplier.
+// Lowers HP so the game's own, unchanged hit takes it to hp - amount * multiplier, or to the floor the game holds.
 void MultiplyHpLoss(const HostMemory& memory, uint64_t owner, uint64_t unit, UnitKind kind, int multiplier,
                     int32_t amount) {
     if (memory.U64(owner + kOwnerUnitOffset) != unit) {
         return;
     }
     const int32_t hp = memory.S32(unit + kUnitHpOffset);
-    const int32_t before_hit = MultipliedHpBeforeHit(multiplier, kind, hp, amount);
+    const int32_t before_hit = MultipliedHpBeforeHit(multiplier, kind, hp, amount, g_kraken_trace.HpFloor(memory, owner));
     if (before_hit != hp) {
         HostMemory::Store<int32_t>(unit + kUnitHpOffset, before_hit);
     }
@@ -260,7 +260,14 @@ void GUEST_HOOK_ABI LethalCheckHook(GuestRegs* regs) {
     if (multiplier == kDamageMultiplierOff || amount <= 0) {
         return;
     }
-    regs->rax = static_cast<uint32_t>(MultipliedDamage(multiplier, ClassifyOwner(HostMemory{}, regs->r15), amount));
+    const HostMemory memory;
+    int32_t hit = MultipliedDamage(multiplier, ClassifyOwner(memory, regs->r15), amount);
+    const int32_t floor = g_kraken_trace.HpFloor(memory, regs->r15);
+    const uint64_t unit = floor > 0 ? memory.U64(regs->r15 + kOwnerUnitOffset) : 0;
+    if (unit != 0) {
+        hit = DamageAboveFloor(hit, amount, memory.S32(unit + kUnitHpOffset), floor);
+    }
+    regs->rax = static_cast<uint32_t>(hit);
 }
 
 // In the damage function (rcx = signed amount, positive is a loss; r15 = the victim's owner), just before HP is read.
