@@ -1036,6 +1036,125 @@ const std::vector<MappedSite> kEuropeSitesAfterScan = {
     {"Cheats", "hook: lethal check", {0x29df05}},
 };
 
+// The sites the launcher's read-only scan reported for the CUSA10209 1.02 executable (SHA-256 927a3d0f...6ac5, issue #14).
+const std::vector<MappedSite> kAsia102Sites = {
+    {"True ultrawide", "submit", {0x57f120}},
+    {"True ultrawide", "fill call 1", {0x57fa23}},
+    {"True ultrawide", "fill call 2", {0x57fb16}},
+    {"True ultrawide", "fill call 3", {0x57f7c9}},
+    {"True ultrawide", "frame commit", {0x5a000d}},
+    {"True ultrawide", "queue", {0x595790}},
+    {"True ultrawide", "part queue call", {0x57326c}},
+    {"True ultrawide", "model draw", {0x577a20}},
+    {"True ultrawide", "widget draw call", {0x4ea6dc, 0x4eba7f, 0x4ec007}},
+    {"True ultrawide", "map draw call", {0x53faf9}},
+    {"True ultrawide", "facility draw call", {0x3a49f5}},
+    {"True ultrawide", "worldmap draw", {0x5479f0}},
+    {"True ultrawide", "fade jumps", {0x4420bb, 0x44287b}},
+    {"True ultrawide", "camera view call", {0x118e9}},
+    {"True ultrawide", "view build", {0x110b0}},
+    {"True ultrawide", "pass ortho load 1", {0x10686}},
+    {"True ultrawide", "pass ortho load 2", {0x106bb}},
+    {"True ultrawide", "pass ortho load 3", {0x10699}},
+    {"True ultrawide", "pass ortho load 4", {0x106d5}},
+    {"True ultrawide", "pass ortho load 5", {0x106f7}},
+    {"True ultrawide", "pass ortho load 6", {0x10703}},
+    {"System type", "card site 1", {0x4d1823}},
+    {"System type", "card site 2", {0x4d183c}},
+    {"System type", "set text", {0x58d040}},
+    {"Skip offers", "story window", {0x3ae692}},
+    {"Skip offers", "tutorial window", {0x3a8479}},
+    {"Startup save", "step tail", {0x4dc1d0}},
+    {"Startup save", "block owner", {0x81510}},
+    {"Startup save", "accept", {0x8b640}},
+    {"Voice language", "cue mapper", {0x686c0}},
+    {"Voice language", "resource acquire", {0x57ab10}},
+    {"Voice language", "narrator bank select", {0x5b6b4}},
+    {"Voice language", "narrator cue base", {0x5bb3e}},
+    {"Voice language", "narrator cue helper", {0x5c08a}},
+    {"Cheats", "hook: damage", {0xd8163}},
+    {"Cheats", "hook: use mana", {0xd67d0}},
+    {"Cheats", "hook: mana drain", {0x344df0}},
+    {"Cheats", "hook: arrows", {0x1b0150}},
+    {"Cheats", "hook: skill points", {0x535e1a}},
+    {"Cheats", "hook: player tick", {0x2e9e90}},
+    {"Cheats", "hook: durability", {0xfdbe3}},
+    {"Cheats", "hook: lives", {0x2ec23b}},
+    {"Cheats", "hook: walk speed", {0x2ec77a}},
+    {"Cheats", "hook: gold shop", {0x52c0bb}},
+    {"Cheats", "hook: gold continue", {0x43cce2}},
+    {"Cheats", "hook: gold stable", {0x3bbf33}},
+    {"Cheats", "hook: gold beggar", {0x3bf7a2}},
+    {"Cheats", "hook: gold base", {0x3c1ca0}},
+    {"Cheats", "hook: gold inn", {0x3c35a9}},
+    {"Cheats", "hook: gold inn 2", {0x3c3b2c}},
+    {"Cheats", "hook: gold list", {0x494b4d}},
+    {"Cheats", "hook: gold list 2", {0x494dad}},
+    {"Cheats", "hook: gold equip", {0x4cab5a}},
+    {"Cheats", "hook: experience", {0x26fa1}},
+    {"Cheats", "hook: skill use", {0x1aeb3c}},
+    {"Cheats", "hook: skill use mirror", {0x1aeb70}},
+    {"Cheats", "hook: skill item wear", {0x2259f0}},
+    {"Cheats", "hook: skill item wear mirror", {0x225a11}},
+    {"Cheats", "hook: skill budget", {0x8a614}},
+    {"Cheats", "hook: lethal check", {0x29d955}},
+    {"Cheats", "function: IsDead", {0x281600}},
+    {"Cheats", "function: Refill", {0xe3640}},
+    {"Cheats", "function: GetGold", {0x43cbe0}},
+    {"Cheats", "function: AddGold", {0x43cc10}},
+    {"Cheats", "function: RecordMode", {0x835d0}},
+    {"Cheats", "function: RecordStage", {0x869d0}},
+    {"Cheats", "function: MaxLevel", {0x4f3e0}},
+    {"Cheats", "function: LevelEntry", {0x2f9810}},
+    {"Cheats", "function: LevelPattern", {0x81ad0}},
+    {"Cheats", "function: SetLevel", {0x81aa0}},
+    {"Cheats", "function: WriteStats", {0x81af0}},
+    {"Cheats", "function: EquipmentCount", {0x2245a0}},
+    {"Cheats", "function: EquipmentItem", {0x224c10}},
+    {"Cheats", "function: IsGear", {0x21960}},
+    {"Cheats", "function: SetDurability", {0x225a40}},
+    {"Exit Game", "sheet fill", {0x58c290}},
+    {"Exit Game", "row widget", {0x53a1ba}},
+    {"Exit Game", "part table", {0x53af47, 0x53afbb}},
+    {"Exit Game", "menu tick", {0x53afd4}},
+    {"Exit Game", "help limit", {0x53b2b8, 0x53b2fa}},
+    {"Exit Game", "part setter", {0x575f60}},
+    {"Exit Game", "part TITLE_1", {0x53ae90}},
+    {"Exit Game", "part START_1", {0x53b42f}},
+    {"Exit Game", "part START_2", {0x53b732}},
+    {"Exit Game", "part OPTION_1", {0x53dabd}},
+    {"Exit Game", "part OPTION_2", {0x53dc2f}},
+    {"Exit Game", "part GALLERY_1", {0x53de0c}},
+    {"Exit Game", "part GALLERY_2", {0x53de8a}},
+    {"Early Story Online", "lead selector", {0x475b10}},
+    {"Early Story Online", "hint call", {0x39c77f}},
+    {"Early Story Online", "notice call", {0x36976e}},
+    {"Early Story Online", "prompt call", {0x369466}},
+    {"Early Story Online", "prompt function", {0x369380}},
+    {"Early Story Online", "prompt owner ctor", {0x333069, 0x369129, 0x369219, 0x39c449, 0x3bb829, 0x40c7a9}},
+    {"Early Story Online", "manager getter", {0x281080}},
+    {"Early Story Online", "town update", {0x3cd280}},
+    {"Early Story Online", "town portal call", {0x3cd3c9}},
+    {"Early Story Online", "menu press call", {0x432084}},
+    {"Early Story Online", "menu step call", {0x4322a1}},
+    {"Early Story Online", "menu kind store", {0x432472}},
+    {"Early Story Online", "hint create", {0x4af2f0}},
+    {"Early Story Online", "hint text", {0x4eaa20}},
+    {"Early Story Online", "hint hide", {0x4ead00}},
+    {"Early Story Online", "hint refresh", {0x58f000}},
+    {"Early Story Online", "room wish", {0x43b3e0}},
+    {"Early Story Online", "room wish location", {0x43b4c0}},
+    {"Early Story Online", "room info location", {0x4387e9}},
+    {"Early Story Online", "host record call", {0x42a05c}},
+    {"Early Story Online", "advance story", {0x475bd0}},
+    {"Early Story Online", "tier writer", {0x477ca0}},
+    {"Early Story Online", "talisman award", {0x476120}},
+    {"Early Story Online", "flag body", {0x86810}},
+    {"Early Story Online", "flag facade", {0x476fb0, 0x477000, 0x477050}},
+};
+
+using SiteLists = std::vector<const std::vector<MappedSite>*>;
+
 const scan::SiteSpec* SpecOf(std::string_view feature, std::string_view name) {
     for (const scan::SiteSpec& spec : scan::Sites()) {
         if (feature == spec.feature && name == spec.name) return &spec;
@@ -1044,10 +1163,10 @@ const scan::SiteSpec* SpecOf(std::string_view feature, std::string_view name) {
 }
 
 // No game bytes: each signature is planted where the scan reported it, so the sites' own layout is what the locators see.
-std::vector<uint8_t> BuildEuropeMap() {
+std::vector<uint8_t> BuildSiteMap(const SiteLists& lists) {
     constexpr uint64_t kSize = 0xed0000, kProbes = 0xd00000, kConstantsAt = 0xe00000;
     std::vector<uint8_t> bytes(kSize, 0);
-    for (const std::vector<MappedSite>* sites : {&kEuropeSites, &kEuropeSitesAfterScan}) {
+    for (const std::vector<MappedSite>* sites : lists) {
         for (const MappedSite& site : *sites) {
             const scan::SiteSpec* spec = SpecOf(site.feature, site.name);
             CHECK(spec != nullptr);
@@ -1069,8 +1188,8 @@ std::vector<uint8_t> BuildEuropeMap() {
     return bytes;
 }
 
-uint64_t EuropeSite(std::string_view feature, std::string_view name, size_t index = 0) {
-    for (const std::vector<MappedSite>* sites : {&kEuropeSites, &kEuropeSitesAfterScan}) {
+uint64_t SiteIn(const SiteLists& lists, std::string_view feature, std::string_view name, size_t index = 0) {
+    for (const std::vector<MappedSite>* sites : lists) {
         for (const MappedSite& site : *sites) {
             if (feature == site.feature && name == site.name) return site.at[index];
         }
@@ -1078,29 +1197,28 @@ uint64_t EuropeSite(std::string_view feature, std::string_view name, size_t inde
     return 0;
 }
 
-// The loader's own entry points, given the CUSA10487 1.03 profile, resolve exactly the mapped sites.
-void TestEuropeanSites() {
-    const auto europe = std::find_if(SupportedBuilds().begin(), SupportedBuilds().end(), [](const GameBuild& build) {
-        return std::string_view(build.title_id) == "CUSA10487";
-    });
-    CHECK(europe != SupportedBuilds().end());
-    if (europe == SupportedBuilds().end()) return;
-    const std::vector<uint8_t> bytes = BuildEuropeMap();
+// The loader's own entry points, given the build's profile, resolve exactly the sites its reporter's scan mapped.
+void TestReportedSites(std::string_view label, const SiteLists& lists) {
+    const auto build = std::find_if(SupportedBuilds().begin(), SupportedBuilds().end(),
+                                     [&](const GameBuild& candidate) { return label == candidate.label; });
+    CHECK(build != SupportedBuilds().end());
+    if (build == SupportedBuilds().end()) return;
+    const std::vector<uint8_t> bytes = BuildSiteMap(lists);
     const DcpExecRange range{0, bytes.size()};
     const DcpImageView view{bytes.data(), bytes.size(), &range, 1};
-    const DcpGameBuild profile = ProfileOf(*europe);
+    const DcpGameBuild profile = ProfileOf(*build);
 
     DcpFeatureSites located{};
     CHECK(dcp_resolve_features(&profile, &view, 1, 1, &located) == 1);
     if (!located.cheats || !located.ultrawide) {
-        std::printf("  CUSA10487: %s | %s\n", located.cheat_failure, located.ultrawide_failure);
+        std::printf("  %s: %s | %s\n", build->label, located.cheat_failure, located.ultrawide_failure);
     }
     CHECK(located.cheats && located.ultrawide);
 
     size_t hook = 0, function = 0;
     for (const scan::SiteSpec& spec : scan::Sites()) {
         if (std::string_view(spec.feature) != "Cheats") continue;
-        const uint64_t expected = EuropeSite("Cheats", spec.name);
+        const uint64_t expected = SiteIn(lists, "Cheats", spec.name);
         if (spec.kind == scan::SiteKind::kHook) {
             CHECK(located.cheat_sites.hooks[hook++] == expected);
         } else {
@@ -1111,7 +1229,7 @@ void TestEuropeanSites() {
     std::string mismatch;
     CHECK(cheats::LayoutMatches(located.cheat_sites.layout, &mismatch));
 
-    const auto ultrawide = [](const char* name, size_t index = 0) { return EuropeSite("True ultrawide", name, index); };
+    const auto ultrawide = [&](const char* name, size_t index = 0) { return SiteIn(lists, "True ultrawide", name, index); };
     const DcpUltrawideSites& u = located.ultrawide_sites;
     CHECK(u.submit == ultrawide("submit") && u.frame_commit == ultrawide("frame commit") && u.queue == ultrawide("queue"));
     CHECK(u.fill_calls[0] == ultrawide("fill call 1") && u.fill_calls[1] == ultrawide("fill call 2") &&
@@ -1128,7 +1246,7 @@ void TestEuropeanSites() {
     DcpExitGameSites exit_game{};
     char failure[192];
     CHECK(dcp_resolve_exit_game(&profile, &view, &exit_game, failure, sizeof(failure)) == 1);
-    const auto exit_site = [](const char* name, size_t index = 0) { return EuropeSite("Exit Game", name, index); };
+    const auto exit_site = [&](const char* name, size_t index = 0) { return SiteIn(lists, "Exit Game", name, index); };
     CHECK(exit_game.sheet_fill == exit_site("sheet fill") && exit_game.row_widget == exit_site("row widget"));
     CHECK(exit_game.help_limits[0] == exit_site("help limit") && exit_game.help_limits[1] == exit_site("help limit", 1));
     CHECK(exit_game.part_table_loads[0] == exit_site("part table") && exit_game.part_table_loads[1] == exit_site("part table", 1));
@@ -1138,10 +1256,9 @@ void TestEuropeanSites() {
     for (size_t i = 0; i < DCP_TRANSITION_PART_COUNT; ++i) CHECK(exit_game.transition_parts[i] == exit_site(parts[i]));
 
     DcpPartySites party{};
-    CHECK(dcp_resolve_party(&profile, &view, &party, failure, sizeof(failure)) == 1 && party.tick == 0x2ea430);
+    CHECK(dcp_resolve_party(&profile, &view, &party, failure, sizeof(failure)) == 1 && party.tick == SiteIn(lists, "Cheats", "hook: player tick"));
 
-    // The reporter's scan covers the cue mapper and the acquire, not the mapper's callers or the narrator sites: Voice
-    // Language on this build rests on the synthetic locator test until its executable is read.
+    // A scan lists no caller of the cue mapper, so a map made from one is not enough for Voice Language.
     DcpVoiceSites voice{};
     CHECK(dcp_resolve_voice_language(&profile, &view, &voice, failure, sizeof(failure)) == 0 &&
           std::string_view(failure).find("cue mapper callers") != std::string_view::npos);
@@ -1152,14 +1269,14 @@ void TestEuropeanSites() {
     const scan::ScanResult scanned = scan::ScanImage(image);
     size_t compared = 0;
     for (const scan::SiteResult& result : scanned.sites) {
-        for (const MappedSite& site : kEuropeSites) {
+        for (const MappedSite& site : *lists.front()) {
             if (std::string_view(site.feature) != result.spec->feature || std::string_view(site.name) != result.spec->name) continue;
             ++compared;
             CHECK(result.status == scan::SiteStatus::kUnique || result.status == scan::SiteStatus::kGroup);
             CHECK(result.matches == site.at);
         }
     }
-    CHECK(compared == kEuropeSites.size());
+    CHECK(compared == lists.front()->size());
     CHECK(scan::kLzcntInstructions == 62 && scan::kLzcntDigest == 0xe53eadb9792a3e8eull);
 }
 
@@ -2010,7 +2127,8 @@ int main() {
     TestLayout();
     TestParty();
     TestExitGame();
-    TestEuropeanSites();
+    TestReportedSites("CUSA10487 1.03 Europe", {&kEuropeSites, &kEuropeSitesAfterScan});
+    TestReportedSites("CUSA10209 1.02 Asia/Hong Kong", {&kAsia102Sites});
     TestSkillUseMirrorSite();
     TestKnownBuildsOnly();
     TestVoiceLocatorSynthetic();

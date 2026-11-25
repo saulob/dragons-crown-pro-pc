@@ -195,16 +195,32 @@ only read, and a failed step leaves the active build as it was.
 | Processors without LZCNT | yes | yes (found by signature) | yes | yes | yes (found by signature) | yes (found by signature) |
 | Cheats | yes | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
 | Voice Language | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) | yes (found by signature) |
+| Boss Battle | yes | yes | yes | yes | yes (found by signature) | yes (found by signature) |
+| Kraken crash fix, item attack cap kept on load | yes | yes | yes | yes | yes (found by signature) | yes (found by signature) |
+| Skip Intro, Unlock Gallery, Japanese Menu Buttons, endgame unlocks | yes | yes | yes | yes | yes (found by signature) | yes (found by signature) |
 | Xbox prompts | yes | yes, when its archives hold the patch's files | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK` | yes, in `DRACRO.CPK`, when it holds the patch's file | yes, when its archives hold the patch's files |
 | Arachnophobia Safe Mode, Frame rate, Display, Graphics filters, Controls | yes | yes | yes | yes | yes | yes |
 
-"yes" here says the build offers the feature and the loader can try it, not that it was seen working. USA 1.01, Asia and
-Hong Kong 1.02 and Europe 1.03 have no local executable: `tools\test.ps1` reports what stands behind each feature on each
-build and prints DATA UNAVAILABLE where nothing does. Installing or selecting one of these builds writes a read-only
+"yes" here is automated parity support: `tools\test.ps1` runs the production locators and installers of every build-dependent
+feature for each of the eight builds on synthetic executables (the parity contract, `tests/parity`), with no game file. Every
+feature must install, refuse wrong, missing, duplicated and cut-off code, refuse an unknown build and overlap no other feature.
+Two more levels of evidence exist where the data does, and their absence limits no feature:
+
+- **Real executable**: the same gate also checks a build whose own executable is on the machine. Asia and Hong Kong 1.02 and
+  Europe 1.03 were never checked this way by the port's author.
+- **Real session**: a log of the game running. Asia and Hong Kong 1.02 has one (issue #14, v1.5.0, `eboot.bin` SHA-256
+  `927a3d0f...6ac5`, the profile's): installation from its two packages, every scanned site (23 of 23 render size and 62 of 62
+  LZCNT instructions), the cheat, Voice Language and True Ultrawide locators, the Skip Intro, Unlock Gallery and Japanese Menu
+  Buttons searches, the cheat hooks (26 of 26), item attack cap, Kraken fix and Exit Game installed, a save created, and the
+  title, the town and the Inn reached at 1920x1080 in Traditional Chinese. It does not show a custom render resolution, an
+  option left Off, Boss Battle, the endgame unlocks, the Skip Offers, Online Play or the Editor's hooks. Europe 1.03 has a
+  read-only scan of its executable (issue #41) and no session.
+
+Installing or selecting USA 1.01, Asia and Hong Kong 1.02 or Europe 1.03 writes a read-only
 `Dragon's Crown Pro build site report` to the log, with what the scan and the loader's searches find in its real executable.
 
 "Found by signature" means the loader does not use a table: it finds each site in the build's own image from
-the byte patterns that give exactly the tables of the five builds checked locally, uses them only when every pattern
+the byte patterns that give exactly the tables of the builds checked locally (Boss Battle: six), uses them only when every pattern
 matches the expected number of times, and otherwise leaves the feature off (Render resolution: the game does not start
 with a custom size). Cheats, Voice Language and True Ultrawide need all of their sites (25 hooks and 15 functions,
 11 sites and 2 tables, 22 sites) to resolve with the verified bytes and their relations, and, for the cheats, every struct displacement

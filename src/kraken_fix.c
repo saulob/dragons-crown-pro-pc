@@ -27,7 +27,8 @@ typedef struct {
     uint64_t window;
 } BuildSite;
 
-/* A window of 0 is a build with no local executable: its site is the one the signature finds. */
+#define SEARCHED 0 /* no local executable: the site is the one the signature finds */
+
 static const BuildSite kBuilds[] = {
     {"CUSA10454-1.00", 0x242ec7},
     {"CUSA10454-1.01", 0x242ec7},
@@ -35,8 +36,8 @@ static const BuildSite kBuilds[] = {
     {"CUSA07001-1.02", 0x242797},
     {"CUSA07001-1.03", 0x2427e7},
     {"CUSA10209-1.00", 0x2425e7},
-    {"CUSA10209-1.02", 0},
-    {"CUSA10487-1.03", 0},
+    {"CUSA10209-1.02", SEARCHED},
+    {"CUSA10487-1.03", SEARCHED},
 };
 
 static const unsigned char kNoMast[KRAKEN_FIX_FLAG_OFFSET + 1];
@@ -63,7 +64,7 @@ int kraken_fix_locate(const unsigned char *image, uint64_t size, const char *gam
     for (size_t i = 0; game && i < sizeof(kBuilds) / sizeof(*kBuilds); ++i) {
         if (strcmp(game, kBuilds[i].game)) continue;
         const uint64_t window = find_window(image, size);
-        if (window && (!kBuilds[i].window || window == kBuilds[i].window)) *site = window + kHookInWindow;
+        if (window && (kBuilds[i].window == SEARCHED || window == kBuilds[i].window)) *site = window + kHookInWindow;
         return 1;
     }
     return 0;

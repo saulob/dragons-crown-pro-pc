@@ -3,8 +3,9 @@
 // Every supported build must offer every GLOBAL feature of CUSA10454 1.00, and the launcher, the runtime and the contract
 // below must agree on it. The test also fails when a build has no row, when an update loses anything its base offers,
 // when a mapping is partial, ambiguous or overlapping, or when an unknown executable could reach a supported build's
-// mapping. Local boot images and prepared folders under build/image and game/prepared are read only; a build without
-// one is proven by synthetic images and reported as such.
+// mapping. The automated contract (tests/parity) runs every build's production locators and installers on synthetic
+// executables and needs no game file. Local boot images and prepared folders under build/image and game/prepared are
+// read only and add evidence; a build without one passes on the contract.
 //
 // Stdout ends with PARITY-BUILD and PARITY-FEATURE lines that tools/test.ps1 turns into its summary.
 #include <algorithm>
@@ -25,6 +26,7 @@
 #include "boss_battle.h"
 #include "boss_battle_online.h"
 #include "cheat_hooks.h"
+#include "build_contract.h"
 #include "comms_bridge.h"
 #include "controller_prompts.h"
 #include "cpk_patch.h"
@@ -183,7 +185,9 @@ Capabilities CapabilitiesOf(const GameBuild& build) {
     caps.menu_buttons = table_or_search(HasButtonsTable(build));
     caps.unlock_gallery = table_or_search(HasGalleryTable(build));
     caps.endgame = table_or_search(HasEndgameTable(build));
-    caps.boss_battle = boss_battle_build_listed(Key(build).c_str()) ? Mapping::kTable : Mapping::kNone;
+    caps.boss_battle = boss_battle_build_listed(Key(build).c_str())     ? Mapping::kTable
+                       : boss_battle_build_searched(Key(build).c_str()) ? Mapping::kSignature
+                                                                        : Mapping::kNone;
     caps.system_type = table_or_search(Listed(system_type_records, build));
     caps.lzcnt = table_or_search(Listed(lzcnt_builds, build));
     caps.startup_save = Listed(startup_save_records, build) ? Mapping::kTable : Mapping::kNone;
@@ -469,7 +473,7 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
     case kUnlockGallery:
         return known && game.unlock_gallery && CapabilitiesOf(build).unlock_gallery != Mapping::kNone;
     case kBossBattle:
-        return known && CapabilitiesOf(build).boss_battle == Mapping::kTable;
+        return known && CapabilitiesOf(build).boss_battle != Mapping::kNone;
     case kEndgameUnlocks:
         return known && CapabilitiesOf(build).endgame != Mapping::kNone;
     case kBrazilianPortuguese:
@@ -486,11 +490,6 @@ bool RuntimeImplements(const GameBuild& build, const DcpGameBuild& game, const C
     }
 }
 
-// Boss Battle is BLOCKED on a build whose executable nobody could check: the launcher says so and the loader refuses it.
-bool BlockedHere(const GameBuild& build, Feature feature) {
-    return feature == kBossBattle && !build.boss_battle;
-}
-
 // A GLOBAL feature passes only when the launcher offers it and the runtime implements it; Port English passes as NOT
 // APPLICABLE only on a build with an English slot of its own.
 bool FeaturePasses(const GameBuild& build, const DcpGameBuild& game, const Contract& row, Feature feature,
@@ -499,10 +498,6 @@ bool FeaturePasses(const GameBuild& build, const DcpGameBuild& game, const Contr
     const bool implemented = RuntimeImplements(build, game, row, feature);
     const bool native = feature == kEnglishPort && NativeEnglish(row);
     const bool native_ok = NativeEnglishSlot(build);
-    if (BlockedHere(build, feature)) {
-        if ((offered || implemented) && why) *why = "BLOCKED without its executable, yet offered or implemented";
-        return !offered && !implemented;
-    }
     const bool pass = native ? !offered && !implemented && native_ok : offered && implemented;
     if (!pass && why) {
         *why = std::string(native ? "expected native, " : "expected on, ") + "launcher " + (offered ? "on" : "off") +
@@ -732,6 +727,9 @@ void TestDisabledFeatureCannotPass() {
         copy = build;
         copy.unlock_gallery = false;
         CHECK(refuses(copy, kUnlockGallery));
+        copy = build;
+        copy.boss_battle = false;
+        CHECK(refuses(copy, kBossBattle));
         CHECK(CheatsAvailable(&build));
     }
     const GameBuild* hk = FindBuild("CUSA10209 1.00 Asia/Hong Kong");
@@ -777,8 +775,7 @@ void TestUpdateParity() {
         lost("lzcnt rewrite", b.lzcnt != Mapping::kNone, u.lzcnt != Mapping::kNone);
         lost("startup save", b.startup_save != Mapping::kNone, u.startup_save != Mapping::kNone);
         lost("endgame unlocks", b.endgame != Mapping::kNone, u.endgame != Mapping::kNone);
-        if (update->boss_battle) lost("boss battle", b.boss_battle != Mapping::kNone, u.boss_battle != Mapping::kNone);
-        else std::printf("  %s: Boss Battle BLOCKED, its executable was never checked\n", update->label);
+        lost("boss battle", b.boss_battle != Mapping::kNone, u.boss_battle != Mapping::kNone);
         CHECK(u.languages == b.languages);
         CHECK(u.translations == b.translations);
         CHECK(update->features_by_signature && base->features_by_signature == !IsUs100(*base));
@@ -856,6 +853,7 @@ void TestGateConsistency() {
                                    "const bool known = build_ && files_ == GameFileState::kValid;",
                                    "known ? build_->title_id : \"\"",
                                    "EditorGame{RootsOf(paths_), build_}",
+                                   "LauncherDisplayLanguage(build_, LauncherLanguage())",
                                    "[this] { return build_; },",
                                    "ArtSourcesOf(paths_.app0, build_ ? build_->regional_archive : nullptr)"};
     std::map<std::string, int> seen;
@@ -1017,7 +1015,7 @@ void TestEuropeBuild() {
     CHECK(caps.resolution == Mapping::kSignature && caps.skip_offers == Mapping::kSignature &&
           caps.skip_intro == Mapping::kSignature && caps.menu_buttons == Mapping::kSignature &&
           caps.unlock_gallery == Mapping::kSignature && caps.system_type == Mapping::kSignature &&
-          caps.lzcnt == Mapping::kSignature && caps.startup_save == Mapping::kTable);
+          caps.lzcnt == Mapping::kSignature && caps.boss_battle == Mapping::kSignature && caps.startup_save == Mapping::kTable);
     CHECK(caps.languages == kWestern && caps.translations == "korean brazilian_portuguese russian");
     CHECK(europe->features_by_signature && europe->resolution_by_signature && europe->check_prompt_fit);
     CHECK(!Listed(ultrawide_records, *europe));
@@ -1648,9 +1646,14 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
         const DcpGameBuild game = LoaderView(build);
         const bool town_found = dcp_resolve_early_story(&game, &original, &town, failure, sizeof(failure)) == 1;
         CHECK(town_found);
+        std::vector<uint8_t> searched(memory);
         CHECK(boss_battle_install(image_bytes, size, entry, Key(build).c_str(), 0, town_found ? &town : nullptr,
-                                  boss_battle_area, boss_battle_stub_bytes()) == (build.boss_battle ? 1 : 0));
-        CHECK(!build.boss_battle || boss_battle_startable_count() == BOSS_BATTLE_ENCOUNTERS);
+                                  boss_battle_area, boss_battle_stub_bytes()) == 1);
+        // The searched installation is the table's, byte for byte, over the same patched image.
+        CHECK(boss_battle_install(searched.data(), size, entry, "CUSA10209-1.02", 0, town_found ? &town : nullptr,
+                                  searched.data() + (boss_battle_area - image_bytes), boss_battle_stub_bytes()) == 1);
+        CHECK(std::equal(image_bytes, image_bytes + size, searched.begin()));
+        CHECK(boss_battle_startable_count() == BOSS_BATTLE_ENCOUNTERS);
         boss_battle_set_available(0);
         const unsigned both = ENDGAME_UNLOCK_LABYRINTH | ENDGAME_UNLOCK_ULTIMATE_TOWER;
         CHECK(endgame_unlocks_install(image_bytes, size, entry, Key(build).c_str(), both, endgame_area,
@@ -1709,7 +1712,7 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
     }
 
     // Online Play: the Early Story hooks go in first and own the director's Start check; Boss Battle goes in beside them.
-    if (build.boss_battle) {
+    {
         const DcpExecRange executable{0, size};
         const DcpImageView original{image.bytes.data(), size, &executable, 1};
         DcpEarlyStorySites town{};
@@ -1720,8 +1723,12 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
         std::vector<uint8_t> online(base + story_stubs + boss_battle_stub_bytes() + page, 0);
         std::memcpy(online.data(), image.bytes.data(), size);
         CHECK(early_story_online_install(online.data(), size, entry, &town, online.data() + base, story_stubs) == 1);
+        std::vector<uint8_t> searched(online);
+        CHECK(boss_battle_install(searched.data(), size, entry, "CUSA10487-1.03", 1, &town, searched.data() + base + story_stubs,
+                                  boss_battle_stub_bytes()) == 1);
         CHECK(boss_battle_install(online.data(), size, entry, Key(build).c_str(), 1, &town, online.data() + base + story_stubs,
                                   boss_battle_stub_bytes()) == 1);
+        CHECK(std::equal(online.begin(), online.begin() + std::ptrdiff_t(size), searched.begin()));
         CHECK(boss_battle_online_available() && online[town.menu_step_call] == 0xe9 && online[town.room_wish_location] == 0xe9);
         const uint64_t create = network_menu_create_function(image.bytes.data(), size, town.menu_kind_store);
         CHECK(create != 0 && create < size && town.menu_kind_store - town.menu_press_call < 0x400 && network_menu_request_available());
@@ -1763,14 +1770,55 @@ struct FixtureReport {
     NativeInstall native;
 };
 
-// What stands behind a feature on a build. A fallback path or a profile flag is not evidence.
-// kStatic: everything the feature needs from the port is proven without the game's data; only its run on that data is not.
-enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kStatic, kDataUnavailable };
+// What stands behind a feature on a build, beyond the automated contract that every build has to pass.
+// kStatic: proven on fixtures and the port's own data; its run on the build's game data is not.
+enum class Proof { kNotNeeded, kRealExecutable, kReporterLog, kContract, kStatic, kUncovered };
+
+parity::ContractResult g_contract;
+
+// The contract features that run a native feature's code; empty for one that patches archives or text.
+std::vector<std::string> ContractOf(Feature feature) {
+    switch (feature) {
+    case kCheats: return {"Cheats"};
+    case kOnlinePlay: return {"Online System type", "Party hooks", "Early Story Online", "Quick Chat"};
+    case kTrueUltrawide: return {"True Ultrawide"};
+    case kRenderResolution:
+    case kAspectRatio: return {"Render resolution and 4K"};
+    case kStorySkip: return {"Story Skip Offer"};
+    case kTutorialSkip: return {"Tutorial Skip Offer"};
+    case kSkipIntro: return {"Skip Intro"};
+    case kMenuButtons: return {"Menu Buttons (Western)", "Menu Buttons (Japanese)"};
+    case kLzcnt: return {"LZCNT compatibility"};
+    case kSaveLoad: return {"Startup save"};
+    case kVoiceLanguage: return {"Voice Language"};
+    case kExitGame: return {"Exit Game"};
+    case kUnlockGallery: return {"Unlock Gallery"};
+    case kBossBattle: return {"Boss Battle", "Boss Battle Online"};
+    case kEndgameUnlocks: return {"Endgame unlocks"};
+    default: return {};
+    }
+}
 
 // What a reporter's read-only scan of the real CUSA10487 1.03 executable proved; tests/feature_sites_tests.cpp pins the
 // sites. The scan had no Skip Intro, Unlock Gallery or Japanese Menu Buttons signatures, and its signatures for the Skip
 // offers, Exit Game, Online Play and the startup save do not cover what those features check when they install.
 constexpr Feature kEuropeScanned[] = {kCheats, kTrueUltrawide, kRenderResolution, kAspectRatio, kLzcnt};
+
+// What the issue #14 log of the CUSA10209 1.02 executable proved: the scan's render size and LZCNT sites, the loader's own
+// locators and searches on that image, and the hooks its v1.5.0 session installed. Boss Battle, the endgame unlocks, the
+// Skip offers and Online Play were not in it.
+constexpr Feature kAsia102Logged[] = {kCheats, kTrueUltrawide, kRenderResolution, kAspectRatio, kLzcnt, kSkipIntro,
+                                      kMenuButtons, kUnlockGallery, kVoiceLanguage, kExitGame};
+
+template <size_t N>
+bool Holds(const Feature (&features)[N], Feature feature) {
+    return std::find(std::begin(features), std::end(features), feature) != std::end(features);
+}
+
+bool InReporterLog(const GameBuild& build, Feature feature) {
+    const std::string key = Key(build);
+    return (key == "CUSA10487-1.03" && Holds(kEuropeScanned, feature)) || (key == "CUSA10209-1.02" && Holds(kAsia102Logged, feature));
+}
 
 Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, const FixtureReport& report) {
     switch (feature) {
@@ -1780,8 +1828,6 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
         return Proof::kNotNeeded;
     case kArachnophobia:
     case kXboxPrompts:
-        if (report.prepared) return Proof::kRealExecutable;
-        return report.executable ? Proof::kStatic : Proof::kDataUnavailable;
     case kBrazilianPortuguese:
     case kEnglishAvailable:
     case kEnglishReady:
@@ -1793,35 +1839,31 @@ Proof ProofOf(const GameBuild& build, const Contract& row, Feature feature, cons
     case kSaveLoad:
         if (row.startup_save == Mapping::kNone) return Proof::kNotNeeded;
         break;
-    case kBossBattle:
-        if (!build.boss_battle) return Proof::kDataUnavailable;
-        break;
     default:
         break;
     }
+    const std::vector<std::string> covered = ContractOf(feature);
+    if (covered.empty() || !std::all_of(covered.begin(), covered.end(), [](const std::string& name) { return g_contract.Covers(name); }))
+        return Proof::kUncovered;
     if (report.executable) return Proof::kRealExecutable;
-    const bool scanned = std::string_view(build.title_id) == "CUSA10487" &&
-                         std::find(std::begin(kEuropeScanned), std::end(kEuropeScanned), feature) != std::end(kEuropeScanned);
-    return scanned ? Proof::kReporterLog : Proof::kDataUnavailable;
+    return InReporterLog(build, feature) ? Proof::kReporterLog : Proof::kContract;
 }
 
-// Nothing counts as proven by being offered: without an image, a log or a game folder a site-dependent feature has no proof.
+// Every feature of every build stands on the contract or on fixtures; a real executable or a log only adds to it.
 void TestProofNeedsEvidence() {
     g_scope = "contract";
     const FixtureReport none, real{true, true, true, "", false, {}};
     for (const GameBuild& build : SupportedBuilds()) {
         const Contract* row = FindContract(build.label);
         if (!row) continue;
-        const bool europe = std::string_view(build.title_id) == "CUSA10487";
-        for (const Feature feature : {kSkipIntro, kMenuButtons, kUnlockGallery, kXboxPrompts, kArachnophobia, kStorySkip, kTutorialSkip,
-                                      kOnlinePlay, kExitGame}) {
-            CHECK(ProofOf(build, *row, feature, none) == Proof::kDataUnavailable);
-            CHECK(ProofOf(build, *row, feature, real) == Proof::kRealExecutable);
+        for (size_t f = 0; f < kFeatureCount; ++f) {
+            const Feature feature = Feature(f);
+            const Proof without = ProofOf(build, *row, feature, none), with = ProofOf(build, *row, feature, real);
+            CHECK(without != Proof::kUncovered && with != Proof::kUncovered && without != Proof::kRealExecutable);
+            CHECK(with == Proof::kRealExecutable || with == Proof::kNotNeeded);
+            CHECK((without == Proof::kReporterLog) == (InReporterLog(build, feature) && !ContractOf(feature).empty()));
+            CHECK(ContractOf(feature).empty() || without == Proof::kNotNeeded || without == Proof::kReporterLog || without == Proof::kContract);
         }
-        for (const Feature feature : {kCheats, kTrueUltrawide, kRenderResolution, kLzcnt}) {
-            CHECK(ProofOf(build, *row, feature, none) == (europe ? Proof::kReporterLog : Proof::kDataUnavailable));
-        }
-        for (const Feature feature : {kController, kKeyboard, kGraphics}) CHECK(ProofOf(build, *row, feature, none) == Proof::kNotNeeded);
     }
 }
 
@@ -2267,6 +2309,18 @@ FixtureReport CheckFixtures(const GameBuild& build) {
     return report;
 }
 
+void PrintContract(const parity::ContractResult& contract) {
+    for (const GameBuild& build : SupportedBuilds()) {
+        std::printf("CONTRACT-BUILD|%s|%s|%zu features\n", build.label, contract.Passes(build.label) ? "PASS" : "FAIL",
+                    contract.features.size());
+        for (const std::string& feature : contract.features)
+            std::printf("CONTRACT|%s|%s|%s\n", build.label, feature.c_str(), parity::PathName(contract.paths.at(build.label).at(feature)));
+    }
+    for (const std::string& difference : contract.differences) std::printf("CONTRACT-DIFFERENCE|%s\n", difference.c_str());
+    std::printf("contract: %d checks, %d failed\n", contract.checks, contract.failures);
+    std::printf("GROUP|parity-contract|%s\n", contract.failures == 0 ? "PASS" : "FAIL");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2283,6 +2337,12 @@ int main(int argc, char** argv) {
         std::printf("GROUP|parity-korean|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    // dcp-build-parity-tests contract: the parity contract alone, without any game file.
+    if (argc == 2 && std::string_view(argv[1]) == "contract") {
+        const parity::ContractResult contract = parity::RunBuildContract();
+        PrintContract(contract);
+        return contract.failures ? 1 : 0;
+    }
     // dcp-build-parity-tests touchscreen: every feature installed together on each local executable, the touch hooks last.
     if (argc == 2 && std::string_view(argv[1]) == "touchscreen") {
         int installed = 0;
@@ -2290,7 +2350,7 @@ int main(int argc, char** argv) {
             g_scope = build.label;
             BootImage image;
             if (!LoadBootImage(build, image)) {
-                std::printf("TOUCH-OVERLAP|%s|BLOCKED\n", build.label);
+                std::printf("TOUCH-OVERLAP|%s|NO_FIXTURE\n", build.label);
                 continue;
             }
             const int before = g_failures;
@@ -2320,6 +2380,11 @@ int main(int argc, char** argv) {
     TestSyntheticRenderLocator();
     TestSyntheticLzcnt();
     TestEuropeBuild();
+    g_contract = parity::RunBuildContract();
+    PrintContract(g_contract);
+    g_checks += g_contract.checks;
+    g_failures += g_contract.failures;
+    for (const auto& [scope, failures] : g_contract.build_failures) g_scope_failures[scope] += failures;
     TestProofNeedsEvidence();
     TestOnline();
     TestUnknownBuilds();
@@ -2334,7 +2399,7 @@ int main(int argc, char** argv) {
     std::printf("\n");
     int shared_failures = g_scope_failures["contract"] + g_scope_failures["synthetic"] + g_scope_failures["unknown"];
     struct Evidence {
-        size_t real = 0, log = 0, none = 0, unproven = 0;
+        size_t real = 0, log = 0, contract = 0, fixtures = 0, uncovered = 0;
         std::string missing;
     };
     Evidence evidence[kFeatureCount];
@@ -2348,32 +2413,28 @@ int main(int argc, char** argv) {
         const FixtureReport& report = reports[build.label];
         const Contract* row = FindContract(build.label);
         std::string missing;
-        size_t unavailable = 0;
         for (size_t f = 0; row && f < kFeatureCount; ++f) {
             Evidence& item = evidence[f];
             switch (ProofOf(build, *row, Feature(f), report)) {
             case Proof::kRealExecutable: ++item.real; break;
             case Proof::kReporterLog: ++item.log; break;
+            case Proof::kContract: ++item.contract; break;
+            case Proof::kStatic: ++item.fixtures; break;
             case Proof::kNotNeeded: break;
-            case Proof::kStatic:
-                ++item.unproven;
-                item.missing += (item.missing.empty() ? "" : ", ") + std::string(build.title_id) + " " + build.version;
-                break;
-            case Proof::kDataUnavailable:
-                ++item.none;
-                ++unavailable;
-                item.missing += (item.missing.empty() ? "" : ", ") + std::string(build.title_id) + " " + build.version;
+            case Proof::kUncovered:
+                ++item.uncovered;
+                item.missing += (item.missing.empty() ? "" : ", ") + Key(build);
                 missing += (missing.empty() ? "" : ", ") + std::string(kFeatureNames[f]);
                 break;
             }
         }
-        const bool failed = g_scope_failures[build.label] > 0 || shared_failures > 0;
-        const char* status = failed ? "FAIL" : !report.executable ? "BLOCKED" : unavailable ? "PARTIAL" : "PASS";
-        std::string detail = report.executable ? "executable" : "no real executable here";
+        const bool failed = g_scope_failures[build.label] > 0 || shared_failures > 0 || !missing.empty();
+        std::string detail = "automated contract";
+        if (!missing.empty()) detail += " lacks " + missing;
+        detail += report.executable ? "; real executable" : "; real executable not here (optional)";
         if (report.executable && !report.note.empty()) detail += ": " + report.note;
-        detail += report.prepared ? "; prepared folder" : "; no prepared folder";
-        if (unavailable) detail += std::string(report.executable ? "; DATA UNAVAILABLE: " : "; BLOCKED, missing evidence: ") + missing;
-        std::printf("PARITY-BUILD|%s|%s|%s\n", build.label, status, detail.c_str());
+        detail += report.prepared ? "; prepared folder" : "; no prepared folder (optional)";
+        std::printf("PARITY-BUILD|%s|%s|%s\n", build.label, failed ? "FAIL" : "PASS", detail.c_str());
         const char* readiness = NativeEnglishSlot(build) ? "ready: native English"
                                 : report.prepared        ? "ready: built-in (served on real data)"
                                                          : "ready: built-in (static)";
@@ -2383,15 +2444,20 @@ int main(int argc, char** argv) {
                                   std::find(std::begin(kProTitleIds), std::end(kProTitleIds), build.title_id) != std::end(kProTitleIds);
         const bool online_feature = row && ProofOf(build, *row, kOnlinePlay, report) == Proof::kRealExecutable &&
                                     g_tally[kOnlinePlay].failures.find(build.label) == std::string::npos;
-        const auto state = [&](bool proven) { return !report.executable ? "BLOCKED" : proven ? "PASS" : "FAIL"; };
-        const char* editor = save_profile ? state(report.native.character_editor) : "FAIL";
-        const char* chat = state(report.native.quick_chat);
-        const char* online = state(online_feature && report.native.online);
-        const char* patches = state(report.patches && report.image_identity);
-        const bool all = std::string_view(editor) == "PASS" && std::string_view(chat) == "PASS" &&
-                         std::string_view(online) == "PASS" && std::string_view(patches) == "PASS";
-        const bool blocked = !report.executable && save_profile;
-        const char* verdict = failed ? "FAIL" : blocked ? "BLOCKED" : all ? "PASS" : "FAIL";
+        const auto state = [&](bool proven, bool contract) {
+            return report.executable ? (proven ? "PASS" : "FAIL") : contract ? "SYNTHETIC" : "FAIL";
+        };
+        const char* editor = save_profile ? state(report.native.character_editor, g_contract.Covers("Appearance Editor hooks") &&
+                                                                                      g_contract.Covers("Character stat hooks"))
+                                          : "FAIL";
+        const char* chat = state(report.native.quick_chat, g_contract.Covers("Quick Chat"));
+        const char* online = state(online_feature && report.native.online,
+                                   ProofOf(build, *row, kOnlinePlay, report) != Proof::kUncovered &&
+                                       g_tally[kOnlinePlay].failures.find(build.label) == std::string::npos);
+        const char* patches = state(report.patches && report.image_identity, g_contract.Passes(build.label));
+        const auto stands = [](std::string_view cell) { return cell != "FAIL"; };
+        const bool all = stands(editor) && stands(chat) && stands(online) && stands(patches);
+        const char* verdict = failed || !all ? "FAIL" : "PASS";
         matrix_failures += std::string_view(verdict) == "FAIL";
         std::printf("MATRIX|%s|%s|CHAR_EDITOR=%s|QUICK_CHAT=%s|ONLINE=%s|PATCHES=%s|%s\n", build.label, kPlatform, editor, chat,
                     online, patches, verdict);
@@ -2400,13 +2466,19 @@ int main(int argc, char** argv) {
     for (size_t f = 0; f < kFeatureCount; ++f) {
         const FeatureTally& tally = g_tally[f];
         const Evidence& item = evidence[f];
-        const char* verdict = tally.passed != builds || shared_failures ? "FAIL " : "PASS ";
+        const char* verdict = tally.passed != builds || shared_failures || item.uncovered ? "FAIL " : "PASS ";
         const size_t applicable = f == kEnglishPort ? builds - tally.native : builds;
-        std::string status = verdict + std::to_string(applicable - item.none) + "/" + std::to_string(applicable);
-        if (item.log) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.log) + " reporter log)";
-        if (item.unproven) status += " (" + std::to_string(item.real) + " real, " + std::to_string(item.unproven) + " static)";
-        if (item.none) status += "; BLOCKED, no real executable: " + item.missing;
-        else if (item.unproven) status += "; RUNTIME DATA UNAVAILABLE: " + item.missing;
+        std::string status = verdict + std::to_string(applicable - item.uncovered) + "/" + std::to_string(applicable);
+        std::string behind;
+        const auto add = [&](size_t count, const char* what) {
+            if (count) behind += (behind.empty() ? "" : ", ") + std::to_string(count) + " " + what;
+        };
+        add(item.real, "real executable");
+        add(item.log, "reporter log");
+        add(item.contract, "contract");
+        add(item.fixtures, "fixtures");
+        if (!behind.empty()) status += " (" + behind + ")";
+        if (item.uncovered) status += "; UNCOVERED: " + item.missing;
         if (tally.native && f == kEnglishPort) {
             status += " (" + std::to_string(tally.native) + " native English, not applicable)";
         } else if (tally.native) {

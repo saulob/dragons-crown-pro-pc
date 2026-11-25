@@ -438,14 +438,19 @@ endif()
 # loader agreement, and patch ranges and signature searches on the local boot images (tools/test.ps1); not part of the
 # default build.
 add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
-    src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c
-    src/gallery_unlock.c src/kraken_fix.c src/touch_absolute.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c src/system_type_hook.c src/ultrawide_hooks.c
-    src/voice_hooks.c src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp
-    src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/endgame_unlocks.c src/boss_battle_online.c
+    src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/startup_save_hook.c src/exit_game_text.c
+    src/title_layout.c src/voice_hooks.c src/boss_battle.c src/boss_battle_campaign.c
+    src/boss_battle_record.cpp src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/boss_battle_online.c
     src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c
-    src/party_hook.cpp src/comms_bridge.cpp src/comms_text.c)
+    src/party_hook.cpp src/comms_text.c
+    tests/parity/build_contract.cpp tests/parity/fixture.cpp tests/parity/scan_fixture.cpp
+    tests/parity/boss_battle_fixture.c tests/parity/item_attack_cap_fixture.c tests/parity/kraken_fixture.c
+    tests/parity/skip_intro_fixture.c tests/parity/skip_offers_fixture.c tests/parity/gallery_fixture.c
+    tests/parity/menu_buttons_fixture.c tests/parity/endgame_fixture.c tests/parity/system_type_fixture.c
+    tests/parity/exit_game_fixture.c tests/parity/ultrawide_fixture.c tests/parity/touch_fixture.c tests/parity/appearance_fixture.c
+    tests/parity/character_override_fixture.c tests/parity/default_message_fixture.c tests/parity/comms_fixture.cpp)
 set_target_properties(dcp-build-parity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-target_include_directories(dcp-build-parity-tests PRIVATE src launcher)
+target_include_directories(dcp-build-parity-tests PRIVATE src launcher tests/parity)
 target_compile_definitions(dcp-build-parity-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-build-parity-tests PRIVATE -Wall -Wextra)
 target_link_libraries(dcp-build-parity-tests PRIVATE dcp_launcher_core)

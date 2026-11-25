@@ -1092,7 +1092,7 @@ int main(int argc, char **argv) {
                 (dcp_voice_language_resources(app0,DCP_VOICE_ENGLISH) || dcp_voice_language_resources(app0,DCP_VOICE_JAPANESE)))
                 features|=DCP_GPU_FEATURE_VOICE_LANGUAGE;
             if (game_build.unlock_gallery) features|=DCP_GPU_FEATURE_UNLOCK_GALLERY;
-            if (boss_battle_build_listed(build_key)) features|=DCP_GPU_FEATURE_BOSS_BATTLE;
+            if (boss_battle_build_listed(build_key) || boss_battle_build_searched(build_key)) features|=DCP_GPU_FEATURE_BOSS_BATTLE;
         }
         DcpGpuConfig gpu={title,serial,user_dir,settings_file,(uint32_t)sdk,attributes,1920,1080,features};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */

@@ -1,8 +1,8 @@
-# Compiles the production sources of Touchscreen Mode (or of the launcher language, -Group launcher-language) into throwaway
+# Compiles the production sources of Touchscreen Mode (or of the launcher language or the build parity, -Group) into throwaway
 # objects with the build's own commands: zero warnings, nothing linked, the build directory untouched. Prints
 # GROUP|<group>-compile|PASS or FAIL.
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$BuildDir, [ValidateSet('touchscreen', 'launcher-language')][string]$Group = 'touchscreen')
+param([Parameter(Mandatory)][string]$BuildDir, [ValidateSet('touchscreen', 'launcher-language', 'build-parity')][string]$Group = 'touchscreen')
 
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'tools\_common.ps1')
@@ -17,6 +17,14 @@ $languageUnits = @(
     @{ Source = 'launcher/character_art.cpp'; Target = 'dcp_launcher_core' }
     @{ Source = 'launcher/item_catalog.cpp'; Target = 'dcp_launcher_core' }
 )
+$parityUnits = @(
+    @{ Source = 'src/loader.c'; Target = 'dragons_crown_pro' }
+    @{ Source = 'src/boss_battle_hook.c'; Target = 'dragons_crown_pro' }
+    @{ Source = 'src/item_attack_cap.c'; Target = 'dragons_crown_pro' }
+    @{ Source = 'src/kraken_fix.c'; Target = 'dragons_crown_pro' }
+    @{ Source = 'launcher/game_profile.cpp'; Target = 'dcp_launcher_core' }
+    @{ Source = 'launcher/launcher.cpp'; Target = 'dcp_launcher' }
+)
 $units = @(
     @{ Source = 'src/loader.c'; Target = 'dragons_crown_pro' }
     @{ Source = 'src/runtime_pad.c'; Target = 'dragons_crown_pro' }
@@ -26,6 +34,7 @@ $units = @(
     @{ Source = 'launcher/launcher.cpp'; Target = 'dcp_launcher' }
 )
 if ($Group -eq 'launcher-language') { $units = $languageUnits }
+if ($Group -eq 'build-parity') { $units = $parityUnits }
 
 $failures = 0
 $json = (& ninja -C $BuildDir -t compdb 2>$null | Out-String)

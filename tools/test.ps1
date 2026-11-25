@@ -55,7 +55,16 @@
   group of dcp-build-parity-tests: every feature installed together on each local executable; the SteamOS touchscreen, Steam
   Deck trackpad, mouse and Options menu suites), compiles the changed production sources with the build's own flags
   (tests\touchscreen_compile_tests.ps1) and reports their result alone. A build without a local executable is reported
-  BLOCKED. No game, no window, no GPU, no link of the game. The normal run includes the same tests.
+  NO_FIXTURE (the parity contract covers it). No game, no window, no GPU, no link of the game. The normal run includes the same tests.
+.PARAMETER BuildParity
+  Builds and runs only the supported-build parity gate. dcp-build-parity-tests runs the automated contract: every build-dependent
+  feature of all eight builds, through the production locators and installers, on synthetic executables planted from the
+  production tables and shapes (installs, refuses wrong, missing, duplicated and cut-off code and unknown builds, overlaps
+  nothing, offline and online), then the capability contract and, where one is present, the build's real executable and
+  prepared folder. The other suites add every locator, the site maps of the reported CUSA10209 1.02 and CUSA10487 1.03
+  executables, the feature suites, the build identities, packages, languages, resolutions and archive patches (the
+  build-profiles group of dcp-launcher-tests), the Editor's English and Portuguese sheets, a compile of the changed production
+  sources and the online-instance build table. No game file is needed; no game, no window, no link of the game.
 .DESCRIPTION
   The default run is the current focus, K8R3M (issue #86, Kraken Damage Multiplier): the cheat tests with the Kraken damage group
   (dcp-cheats-tests), the Kraken null mast fix (dcp-kraken-fix-tests) and the hook locators (dcp-feature-sites-tests). Every other
@@ -78,12 +87,10 @@
   and overlap) from the same executable on Windows and, through the Linux gate, on Linux, and fails when the two differ. Every supported build must offer every GLOBAL
   feature of CUSA10454 1.00; the global feature summary counts the builds that do.
 
-  Local boot images (build\image, then build\research\image for a build the launcher has not prepared) and prepared
-  folders (game\prepared) are read only. A build without a real executable is BLOCKED, never supported by synthetic images
-  alone: the summary names it and it is no failure. These six builds must PASS with their real executable, or the run
-  fails: CUSA10454 1.00 and 1.01, CUSA07001 1.00, 1.02 and 1.03, CUSA10209 1.00. CUSA10209 1.02 and CUSA10487 1.03
-  have no executable here and are reported BLOCKED. A feature that needs the game archives counts as proven by the executable and the port's static
-  checks where the build has no prepared folder, and the summary says so.
+  Every supported build must pass the automated parity contract, which needs no game file. Local boot images (build\image,
+  then build\research\image for a build the launcher has not prepared) and prepared folders (game\prepared) are read only and
+  add real-executable evidence: a build whose real executable is here and fails it fails the run, and a build without one
+  passes on the contract, which the summary says.
 
   Online relay: the net tests (frame codec, direct regression, automatic fallback, mixed rooms, failure paths, timeouts,
   compatibility, Connection test) run against loopback sockets and an in-process stand-in for the lobby; with Node.js
@@ -107,7 +114,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor, [switch]$GamescopePacing, [switch]$TouchscreenMode)
+param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor, [switch]$GamescopePacing, [switch]$TouchscreenMode, [switch]$BuildParity)
 
 $script:Clock = [Diagnostics.Stopwatch]::StartNew()
 $script:StartClock = [datetime]::Now
@@ -369,9 +376,8 @@ $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-b
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
                   'dcp-launcher-tests', 'dcp-launcher-startup-tests', 'dcp-korean-localization-tests', 'dcp-issue84-tests', 'dcp-item-attack-cap-tests',
                   'dcp-save-editor-tests', 'dcp-save-page-tests', 'dcp-inventory-editor-tests', 'dcp-character-override-tests'
-$requiredBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
-                  'CUSA10209 1.00 Asia/Hong Kong'
-$blockedBuilds = 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
+$supportedBuilds = 'CUSA10454 1.00 USA', 'CUSA10454 1.01 USA', 'CUSA07001 1.00 Japan', 'CUSA07001 1.02 Japan', 'CUSA07001 1.03 Japan',
+                   'CUSA10209 1.00 Asia/Hong Kong', 'CUSA10209 1.02 Asia/Hong Kong', 'CUSA10487 1.03 Europe'
 
 $tests = @(
     (Test-Step 'Windows memory tests (sparse backing, commitment, aliases, release)' 'dcp-memory-windows-tests'),
@@ -495,15 +501,16 @@ $tests = @(
 )
 
 $defaultFocusName = 'K9F4LX issue #89 launcher language isolation'
-$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-inventory-editor-tests', 'dcp-save-editor-tests', 'dcp-options-menu-tests')
+$defaultFocusSuites = @('dcp-launcher-tests', 'dcp-inventory-editor-tests', 'dcp-save-editor-tests', 'dcp-options-menu-tests', 'dcp-build-parity-tests')
 # The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
 $defaultFocusGroups = [ordered]@{
     'dcp-launcher-tests launcher-language' = @('GROUP|launcher-language|PASS')
     'dcp-inventory-editor-tests localization' = @('GROUP|inventory-localization|PASS', 'GROUP|inventory-ui|PASS')
     'dcp-save-editor-tests localization' = @('GROUP|editor-localization|PASS')
     'launcher language production compile' = @('GROUP|launcher-language-compile|PASS')
+    'dcp-build-parity-tests contract' = @('GROUP|parity-contract|PASS')
 }
-$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor -or $GamescopePacing -or $TouchscreenMode)
+$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor -or $GamescopePacing -or $TouchscreenMode -or $BuildParity)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
@@ -516,6 +523,17 @@ $inventoryEditorSuites = @('dcp-inventory-editor-tests', 'dcp-save-editor-tests'
 $gamescopePacingSuites = @('dcp-present-tests', 'dcp-frame-pacing-tests')
 $touchscreenModeSuites = @('dcp-touch-absolute-tests', 'dcp-touchscreen-steamos-tests', 'dcp-steam-deck-trackpad-tests', 'dcp-mouse-tests',
                            'dcp-launcher-tests', 'dcp-build-parity-tests', 'dcp-options-menu-tests')
+$buildParitySuites = @('dcp-build-parity-tests', 'dcp-feature-sites-tests', 'dcp-boss-battle-tests', 'dcp-item-attack-cap-tests', 'dcp-kraken-fix-tests',
+                       'dcp-skip-intro-tests', 'dcp-skip-offers-tests', 'dcp-gallery-unlock-tests', 'dcp-endgame-unlocks-tests', 'dcp-menu-buttons-tests',
+                       'dcp-exit-game-tests', 'dcp-system-type-tests', 'dcp-build-diagnostics-tests', 'dcp-options-menu-tests', 'dcp-launcher-tests',
+                       'dcp-inventory-editor-tests', 'dcp-save-editor-tests')
+$buildParityGroups = [ordered]@{
+    'dcp-build-parity-tests' = 'GROUP|parity-contract|PASS'
+    'dcp-launcher-tests build-profiles' = 'GROUP|launcher-build-profiles|PASS'
+    'dcp-inventory-editor-tests localization' = 'GROUP|inventory-localization|PASS'
+    'dcp-save-editor-tests localization' = 'GROUP|editor-localization|PASS'
+    'build parity production compile' = 'GROUP|build-parity-compile|PASS'
+}
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -574,6 +592,21 @@ if ($BossBattleOnline) {
         ($tests | Where-Object { $_.Exe -in 'dcp-touchscreen-steamos-tests', 'dcp-steam-deck-trackpad-tests', 'dcp-mouse-tests', 'dcp-options-menu-tests' })
     )
     $requiredSuites = $touchscreenModeSuites
+} elseif ($BuildParity) {
+    $grouped = 'dcp-launcher-tests', 'dcp-inventory-editor-tests', 'dcp-save-editor-tests'
+    $tests = @(
+        (Test-Step 'build identities, packages, languages, resolutions and Boss Battle availability (dcp-launcher-tests build-profiles)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests build-profiles' -Arguments @('build-profiles'))
+        (Test-Step 'Inventory Editor names and modifiers in the launcher language (dcp-inventory-editor-tests localization)' 'dcp-inventory-editor-tests' -Capture `
+            -Key 'dcp-inventory-editor-tests localization' -Arguments @('localization'))
+        (Test-Step 'Appearance Editor colour names in the launcher language (dcp-save-editor-tests localization)' 'dcp-save-editor-tests' -Capture `
+            -Key 'dcp-save-editor-tests localization' -Arguments @('localization'))
+        ($tests | Where-Object { $buildParitySuites -contains $_.Exe -and $grouped -notcontains $_.Exe })
+        ($tests | Where-Object { $_.Script -eq 'tests\online_instance_tests.ps1' })
+        (Test-Step 'build parity production sources (object compile with the build flags, zero warnings, nothing linked)' -Script 'tests\touchscreen_compile_tests.ps1' -Capture `
+            -Key 'build parity production compile' -Arguments @('-BuildDir', $buildDir, '-Group', 'build-parity') -Nominal 60)
+    )
+    $requiredSuites = $buildParitySuites
 } elseif ($EditorRelease) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
     $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Command { Get-LinuxBuildCommand '--editor' } `
@@ -592,6 +625,8 @@ if ($BossBattleOnline) {
         ($tests | Where-Object { $_.Exe -eq 'dcp-options-menu-tests' })
         (Test-Step 'launcher language production sources (object compile with the build flags, zero warnings, nothing linked)' -Script 'tests\touchscreen_compile_tests.ps1' -Capture `
             -Key 'launcher language production compile' -Arguments @('-BuildDir', $buildDir, '-Group', 'launcher-language') -Nominal 60)
+        (Test-Step 'supported-build parity contract (dcp-build-parity-tests contract: every build-dependent feature of all eight builds on synthetic executables, no game files)' 'dcp-build-parity-tests' -Capture `
+            -Key 'dcp-build-parity-tests contract' -Arguments @('contract') -Nominal 90)
     )
     $requiredSuites = $defaultFocusSuites
 }
@@ -599,7 +634,7 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($GamescopePacing) { & ninja -C $buildDir @gamescopePacingSuites } elseif ($TouchscreenMode) { & ninja -C $buildDir @touchscreenModeSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($GamescopePacing) { & ninja -C $buildDir @gamescopePacingSuites } elseif ($TouchscreenMode) { & ninja -C $buildDir @touchscreenModeSuites } elseif ($BuildParity) { & ninja -C $buildDir @buildParitySuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-launcher-startup-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-touch-absolute-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
@@ -757,7 +792,7 @@ if ($TouchscreenMode) {
     Write-Host 'Touchscreen locator, real executables (read only):' -ForegroundColor Cyan
     $realRows = @($hookLines | Where-Object { "$_" -like 'TOUCH-REAL|*' } | ForEach-Object { ,"$_".Split('|') })
     foreach ($row in $realRows) {
-        $color = if ($row[2] -eq 'PASS') { 'Green' } elseif ($row[2] -eq 'BLOCKED') { 'Yellow' } else { 'Red' }
+        $color = if ($row[2] -eq 'PASS') { 'Green' } elseif ($row[2] -eq 'NO_FIXTURE') { 'Gray' } else { 'Red' }
         Write-Host ("  {0}: {1} ({2})" -f $row[1], $row[2], $row[3]) -ForegroundColor $color
         if ($row[2] -eq 'FAIL' -and -not $failed.Contains('dcp-touch-absolute-tests')) { $failed.Add('dcp-touch-absolute-tests') }
     }
@@ -771,6 +806,33 @@ if ($TouchscreenMode) {
         exit 1
     }
     Write-Host 'Touchscreen mode tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($BuildParity) {
+    foreach ($key in $buildParityGroups.Keys) {
+        if (-not (@($captured[$key]) | Where-Object { "$_".StartsWith($buildParityGroups[$key]) })) {
+            Write-Host "FAIL: $key did not print $($buildParityGroups[$key])" -ForegroundColor Red
+            if (-not $failed.Contains($key)) { $failed.Add($key); $exitCodes[$key] = 1 }
+        }
+    }
+    Write-Host ''
+    Write-Host 'Automated parity contract (all eight builds; a real executable is optional extra evidence):' -ForegroundColor Cyan
+    $parityLines = @($captured['dcp-build-parity-tests'])
+    $parityRows = @($parityLines | Where-Object { "$_" -like 'PARITY-BUILD|*' } | ForEach-Object { ,"$_".Split('|') })
+    foreach ($name in $supportedBuilds) {
+        $row = $parityRows | Where-Object { $_[1] -eq $name } | Select-Object -First 1
+        $state = if ($row) { $row[2] } else { 'MISSING' }
+        Write-Host ("  {0}: {1} ({2})" -f $name, $state, $(if ($row) { $row[3] } else { 'no result' })) -ForegroundColor $(if ($state -eq 'PASS') { 'Green' } else { 'Red' })
+        if ($state -ne 'PASS' -and -not $failed.Contains('dcp-build-parity-tests')) { $failed.Add('dcp-build-parity-tests') }
+    }
+    foreach ($line in @($parityLines | Where-Object { "$_" -like 'CONTRACT-DIFFERENCE|*' -or "$_" -like 'PARITY-FEATURE|*' -or "$_" -like 'contract: *' })) { Write-Host "  $line" }
+    Write-Host ''
+    Write-Host ('Build parity: {0} PASS, {1} FAIL' -f ($tests.Count - $failed.Count), $failed.Count) -ForegroundColor Cyan
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Build parity tests passed.' -ForegroundColor Green
     exit 0
 }
 if ($GamescopePacing) {
@@ -842,8 +904,6 @@ $parityOutput = @($captured['dcp-build-parity-tests'])
 
 Write-Host ''
 Write-Host 'Build parity:' -ForegroundColor Cyan
-$partial = $false
-$blockedNames = New-Object System.Collections.Generic.List[string]
 $rows = @($parityOutput | Where-Object { $_ -like 'PARITY-BUILD|*' } | ForEach-Object { ,$_.Split('|') })
 if ($rows.Count -eq 0) {
     Write-Host '  no result from dcp-build-parity-tests' -ForegroundColor Red
@@ -853,19 +913,14 @@ foreach ($row in $rows) {
     $status = $row[2]
     $good = $status -notlike 'FAIL*' -and $parityFailed.Count -eq 0
     if ($status -notlike 'FAIL*' -and -not $good) { $status = 'FAIL (a shared parity test failed)' }
-    if ($status -like 'PARTIAL*') { $status += " ($(($row[3] -split '; ' | Where-Object { $_ -like 'DATA UNAVAILABLE*' })))"; $partial = $true }
-    if ($status -like 'BLOCKED*') { $status = 'BLOCKED (no real executable here; not supported on synthetic evidence)'; $blockedNames.Add($row[1]); $partial = $true }
-    Write-Host ('  {0,-34} {1}' -f $row[1], $status) -ForegroundColor $(if (-not $good) { 'Red' } elseif ($status -like 'PARTIAL*' -or $status -like 'BLOCKED*') { 'Yellow' } else { 'Green' })
+    Write-Host ('  {0,-34} {1} ({2})' -f $row[1], $status, $row[3]) -ForegroundColor $(if ($good) { 'Green' } else { 'Red' })
 }
-foreach ($name in $requiredBuilds) {
+foreach ($name in $supportedBuilds) {
     $row = $rows | Where-Object { $_[1] -eq $name } | Select-Object -First 1
-    if (-not $row -or $row[2] -ne 'PASS' -or $row[3] -notlike 'executable*') {
-        Write-Host "  required build $name did not PASS with its real executable" -ForegroundColor Red
-        $failed.Add("required build: $name")
+    if (-not $row -or $row[2] -ne 'PASS') {
+        Write-Host "  $name did not PASS the automated parity contract" -ForegroundColor Red
+        $failed.Add("supported build: $name")
     }
-}
-foreach ($name in $blockedNames) {
-    if ($blockedBuilds -notcontains $name) { Write-Host "  $name lost its executable evidence" -ForegroundColor Red; $failed.Add("required build: $name") }
 }
 
 # One MATRIX line per supported build and platform from dcp-build-parity-tests; Linux comes from the WSL gate's run of
@@ -878,7 +933,7 @@ function Read-Matrix([string[]]$Lines) {
     }
     return $table
 }
-$matrixBuilds = @($requiredBuilds) + @($blockedBuilds)
+$matrixBuilds = @($supportedBuilds)
 $linuxMatrixName = @($skipped.Keys + $captured.Keys) | Where-Object { $_ -like 'Linux gate*' } | Select-Object -First 1
 $matrices = [ordered]@{ windows = Read-Matrix $parityOutput }
 if ($linuxMatrixName -and $captured.ContainsKey($linuxMatrixName)) { $matrices['linux'] = Read-Matrix $captured[$linuxMatrixName] }
@@ -888,7 +943,7 @@ $linuxReason = if ($linuxMatrixName -and $skipped.ContainsKey($linuxMatrixName))
 $editorParity = Show-EditorValidation $windowsEditor $linuxEditor $linuxReason
 
 # Every supported build, with how deep its validation went: PASS_REAL needs the build's executable and archives, PASS_SYNTHETIC
-# is the shared code path on fixtures, BLOCKED_EXECUTABLE is a build whose executable is not here.
+# is the same production code on synthetic executables and fixtures.
 $onlineStatic = @{}
 foreach ($line in @($captured['dcp-online-builds-tests'])) {
     $parts = "$line".Trim().Split('|')
@@ -907,9 +962,9 @@ Write-Host '  BUILD|WINDOWS_EDITOR|LINUX_EDITOR|TRANSLATION_COMPOSITION|SAVE|QUI
 foreach ($name in $matrixBuilds) {
     $hookRow = $matrices['windows'][$name]
     $hookStates = if ($hookRow) { @($hookRow[2..5]) } else { @('MISSING') }
-    $hooks = if (-not ($hookStates | Where-Object { $_ -ne 'PASS' })) { 'PASS_REAL' } elseif (-not ($hookStates | Where-Object { $_ -ne 'BLOCKED' })) { 'BLOCKED_EXECUTABLE' } else { 'FAIL' }
-    $quick = if ($hookRow -and $hookRow[3] -eq 'PASS') { 'PASS_REAL' } elseif ($hookRow -and $hookRow[3] -eq 'BLOCKED' -and $commsSynthetic -and $onlineStatic[$name]) { 'PASS_SYNTHETIC' } else { 'FAIL' }
-    $online = if ($hookRow -and $hookRow[4] -eq 'PASS') { 'PASS_REAL' } elseif ($hookRow -and $hookRow[4] -eq 'BLOCKED' -and $onlineStatic[$name]) { 'PASS_SYNTHETIC' } else { 'FAIL' }
+    $hooks = if (-not ($hookStates | Where-Object { $_ -ne 'PASS' })) { 'PASS_REAL' } elseif (-not ($hookStates | Where-Object { $_ -ne 'PASS' -and $_ -ne 'SYNTHETIC' })) { 'PASS_SYNTHETIC' } else { 'FAIL' }
+    $quick = if ($hookRow -and $hookRow[3] -eq 'PASS') { 'PASS_REAL' } elseif ($hookRow -and $hookRow[3] -eq 'SYNTHETIC' -and $commsSynthetic -and $onlineStatic[$name]) { 'PASS_SYNTHETIC' } else { 'FAIL' }
+    $online = if ($hookRow -and $hookRow[4] -eq 'PASS') { 'PASS_REAL' } elseif ($hookRow -and $hookRow[4] -eq 'SYNTHETIC' -and $onlineStatic[$name]) { 'PASS_SYNTHETIC' } else { 'FAIL' }
     $own = @($windowsEditor.Rows | Where-Object { $name.StartsWith("$($_.Build) ") })
     $composition = if (-not $own.Count -or ($own | Where-Object { $_.Result -ne 'PASS' })) { 'FAIL' } elseif ($own | Where-Object { $_.Evidence -like 'real*' }) { 'PASS_REAL' } else { 'PASS_SYNTHETIC' }
     $saveKey = @($windowsEditor.Saves.Keys | Where-Object { $name.StartsWith("$_ ") }) | Select-Object -First 1
@@ -918,12 +973,12 @@ foreach ($name in $matrixBuilds) {
     $linuxState = Get-EditorState $linuxEditor $name
     $cells = @($windowsState, $linuxState, $composition, $save, $quick, $online, $hooks)
     $level = if ($hooks -eq 'PASS_REAL') { 'REAL' } else { 'SYNTHETIC' }
-    $result = if ($cells -contains 'FAIL') { 'FAIL' } elseif ($hooks -eq 'BLOCKED_EXECUTABLE') { 'BLOCKED' } else { 'PASS' }
-    if ($result -eq 'FAIL' -or ($requiredBuilds -contains $name -and $result -ne 'PASS')) { $failed.Add("validation matrix: $name") }
-    Write-Host ('  ' + (@($name) + $cells + @($level, $result) -join '|')) -ForegroundColor $(if ($result -eq 'PASS') { 'Green' } elseif ($result -eq 'BLOCKED') { 'Yellow' } else { 'Red' })
+    $result = if ($cells -contains 'FAIL') { 'FAIL' } else { 'PASS' }
+    if ($result -eq 'FAIL') { $failed.Add("validation matrix: $name") }
+    Write-Host ('  ' + (@($name) + $cells + @($level, $result) -join '|')) -ForegroundColor $(if ($result -eq 'PASS') { 'Green' } else { 'Red' })
 }
 foreach ($name in @($matrices['windows'].Keys | Where-Object { $matrixBuilds -notcontains $_ })) {
-    Write-Host "  $name|not in the required or blocked build lists" -ForegroundColor Red
+    Write-Host "  $name|not in the supported build list" -ForegroundColor Red
     $failed.Add("validation matrix: $name unexpected")
 }
 $matrixParity = if (-not $matrices.Contains('linux')) {
@@ -1143,16 +1198,11 @@ foreach ($entry in $launcherSummary.GetEnumerator()) {
 }
 $ranCount = $tests.Count - $skipped.Count
 Write-Host ''
-Write-Host ('Result: {0} PASS, {1} FAIL, {2} SKIPPED, {3} BLOCKED' -f ($ranCount - $failed.Count), $failed.Count, $skipped.Count, $blockedNames.Count) -ForegroundColor Cyan
+Write-Host ('Result: {0} PASS, {1} FAIL, {2} SKIPPED, {3} BLOCKED' -f ($ranCount - $failed.Count), $failed.Count, $skipped.Count, 0) -ForegroundColor Cyan
 foreach ($name in $skipped.Keys) { Write-Host "  SKIPPED: $name ($($skipped[$name]))" -ForegroundColor Yellow }
-foreach ($name in $blockedNames) { Write-Host "  BLOCKED: $name (no real executable here)" -ForegroundColor Yellow }
 if ($failed.Count -gt 0) {
     Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
     exit 1
 }
-if ($partial) {
-    Write-Host ('All tests passed. The six required builds PASS; BLOCKED (no real executable): ' + ($blockedNames -join ', ') + '.') -ForegroundColor Yellow
-} else {
-    Write-Host 'All tests passed.' -ForegroundColor Green
-}
+Write-Host 'All tests passed. Every supported build passes the automated parity contract.' -ForegroundColor Green
 exit 0

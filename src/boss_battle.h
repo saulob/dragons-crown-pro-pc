@@ -547,10 +547,14 @@ void boss_battle_set_inn_functions(const BossBattleInnFunctions *functions);
 /* The Inn's help message per native row; set by the install. */
 void boss_battle_set_inn_help_table(uint64_t table);
 
-/* 1 for a build whose sites are listed. */
+/* 1 for a build whose sites are listed, and for one whose sites are only searched for. */
 int boss_battle_build_listed(const char *game);
+int boss_battle_build_searched(const char *game);
 
-/* 1 with every site verified for a listed build; 0 and `why` otherwise. Reads the image only. */
+/* Finds and verifies every site without a table: 1 only when each one is found exactly once. Reads the image only. */
+int boss_battle_search(const unsigned char *image, uint64_t size, BossBattleSites *sites, const char **why);
+
+/* 1 with every site verified for a listed or searched build; 0 and `why` otherwise. Reads the image only. */
 int boss_battle_locate(const unsigned char *image, uint64_t size, const char *game, BossBattleSites *sites,
                        const char **why);
 

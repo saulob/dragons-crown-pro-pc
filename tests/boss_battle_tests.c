@@ -4927,8 +4927,92 @@ static void check_network_row_sites(unsigned char *image, uint64_t size, const c
     CHECK(boss_battle_locate(image, size, game, &probe, &why) == 1);
 }
 
+static const char *const kSearchedKeys[] = {"CUSA10209-1.02", "CUSA10487-1.03"};
+
+static int search_refused(const unsigned char *image, uint64_t size) {
+    BossBattleSites found;
+    const char *why = NULL;
+    return boss_battle_search(image, size, &found, &why) == 0 && why && *why;
+}
+
+static uint64_t zero_run(const unsigned char *image, uint64_t size, uint64_t length) {
+    uint64_t run = 0;
+    for (uint64_t at = size / 2; at < size; ++at) {
+        run = image[at] ? 0 : run + 1;
+        if (run == length) return at + 1 - length;
+    }
+    return 0;
+}
+
+/* The search finds on every listed build exactly the sites its table lists, whatever the build is called, and nothing
+ * when a site is changed, doubled or cut off. */
+static void check_search(unsigned char *image, uint64_t size, const BossBattleSites *sites, const PatchedSite *all, size_t count,
+                         size_t step) {
+    BossBattleSites found;
+    const char *why = NULL;
+    memset(&found, 0, sizeof(found));
+    CHECK(boss_battle_search(image, size, &found, &why) == 1 && !memcmp(&found, sites, sizeof(found)));
+    if (why) printf("  search: %s\n", why);
+    for (size_t i = 0; i < sizeof(kSearchedKeys) / sizeof(*kSearchedKeys); ++i) {
+        memset(&found, 0, sizeof(found));
+        CHECK(boss_battle_locate(image, size, kSearchedKeys[i], &found, &why) == 1 && !memcmp(&found, sites, sizeof(found)));
+    }
+    CHECK(boss_battle_locate(image, size, "CUSA10209-1.01", &found, &why) == 0 && boss_battle_locate(image, size, NULL, &found, &why) == 0);
+
+    for (size_t i = 0; i < count; i += step) {
+        const int background = all[i].at == sites->inn_layer || all[i].at == sites->inn_layer_tail;
+        image[all[i].at] ^= 0x10;
+        const int refused = background ? boss_battle_search(image, size, &found, &why) == 1 && found.inn_background_failure
+                                       : search_refused(image, size);
+        CHECK(refused);
+        if (!refused) printf("  search: changed site %#llx was not refused\n", (unsigned long long)all[i].at);
+        image[all[i].at] ^= 0x10;
+    }
+
+    enum { COPY = 0x100 };
+    const uint64_t spare = zero_run(image, size, COPY + 0x40);
+    const uint64_t doubled[] = {sites->hook - 0x25, sites->save_copy - 0x1e, sites->pause_mode, sites->add_player, sites->slot_request};
+    CHECK(spare != 0);
+    for (size_t i = 0; spare && i < sizeof(doubled) / sizeof(*doubled); ++i) {
+        memcpy(image + spare, image + doubled[i], COPY);
+        CHECK(search_refused(image, size));
+        memset(image + spare, 0, COPY);
+    }
+    CHECK(search_refused(image, 0) && search_refused(image, 0x40) && search_refused(image, size / 4) &&
+          search_refused(image, sites->add_player + 4));
+
+    uint64_t saved;
+    const uint64_t slot = sites->scene_vtable + 0x60, outside = size + 0x100;
+    memcpy(&saved, image + slot, sizeof(saved));
+    memcpy(image + slot, &outside, sizeof(outside));
+    CHECK(search_refused(image, size));
+    if (saved < size) { /* the pointer as the loader relocates it */
+        const uint64_t relocated = (uint64_t)(uintptr_t)(image + saved);
+        memcpy(image + slot, &relocated, sizeof(relocated));
+        CHECK(boss_battle_search(image, size, &found, &why) == 1 && !memcmp(&found, sites, sizeof(found)));
+    }
+    memcpy(image + slot, &saved, sizeof(saved));
+    CHECK(boss_battle_search(image, size, &found, &why) == 1 && !memcmp(&found, sites, sizeof(found)));
+}
+
+static void test_search_without_game_code(void) {
+    static unsigned char none[0x4000];
+    BossBattleSites sites;
+    const char *why = NULL;
+    for (size_t i = 0; i < sizeof(kSearchedKeys) / sizeof(*kSearchedKeys); ++i) {
+        CHECK(boss_battle_build_searched(kSearchedKeys[i]) && !boss_battle_build_listed(kSearchedKeys[i]));
+        CHECK(boss_battle_locate(none, sizeof(none), kSearchedKeys[i], &sites, &why) == 0 && why);
+        CHECK(boss_battle_install(none, sizeof(none), 0, kSearchedKeys[i], 0, NULL, none, 0) == 0 && !boss_battle_available());
+    }
+    for (size_t b = 0; b < sizeof(kRealBuilds) / sizeof(*kRealBuilds); ++b) CHECK(!boss_battle_build_searched(kRealBuilds[b].game));
+    CHECK(!boss_battle_build_searched(NULL) && !boss_battle_build_searched("CUSA10209-1.01") && !boss_battle_build_listed(NULL));
+    CHECK(boss_battle_locate(none, sizeof(none), "CUSA00000-9.99", &sites, &why) == 0 && !strcmp(why, "not a supported build"));
+    for (size_t at = 0; at < sizeof(none); ++at)
+        if (none[at]) { CHECK(!"the image was written"); break; }
+}
+
 static void test_real_images(void) {
-    CHECK(!boss_battle_build_listed("CUSA10209-1.02") && !boss_battle_build_listed("CUSA10487-1.03") && !boss_battle_build_listed(NULL));
+    test_search_without_game_code();
     for (size_t b = 0; b < sizeof(kRealBuilds) / sizeof(*kRealBuilds); ++b) {
         const char *game = kRealBuilds[b].game;
         const size_t room = boss_battle_stub_bytes();
@@ -4971,6 +5055,7 @@ static void test_real_images(void) {
         }
         check_network_row_sites(image, size, game);
         check_after_exit_game(image, size, game, &sites);
+        check_search(image, size, &sites, all, count, b == 0 || !strcmp(game, "CUSA10209-1.00") ? 1 : 8);
         CHECK(!memcmp(image, before, size + room));
         DcpEarlyStorySites town;
         memset(&town, 0, sizeof(town));

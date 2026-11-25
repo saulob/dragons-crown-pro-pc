@@ -4,6 +4,7 @@
 #include <string.h>
 
 #define ANY (-1)
+#define SEARCHED 0 /* no local executable: the site is the one the signature finds */
 
 /* The weapon branch of the validator: the attack pair, the level's row of the cap table, then each byte stored back when it
  * is above the cap. The two stores are what the port removes. */
@@ -18,7 +19,7 @@ static const uint8_t kNop5[ITEM_ATTACK_CAP_STORE_BYTES] = {0x0f, 0x1f, 0x44, 0x0
 
 typedef struct {
     const char *game;
-    uint64_t window; /* 0: no local executable, the site is the one the signature finds */
+    uint64_t window;
 } BuildSite;
 
 static const BuildSite kBuilds[] = {
@@ -28,8 +29,8 @@ static const BuildSite kBuilds[] = {
     {"CUSA07001-1.02", 0x23708},
     {"CUSA07001-1.03", 0x23708},
     {"CUSA10209-1.00", 0x235c8},
-    {"CUSA10209-1.02", 0},
-    {"CUSA10487-1.03", 0},
+    {"CUSA10209-1.02", SEARCHED},
+    {"CUSA10487-1.03", SEARCHED},
 };
 
 /* The level cap table the window reads: the first byte of each 0x58 byte row, 5 at level 1 up to 255 at level 99. */
@@ -65,8 +66,8 @@ int item_attack_cap_locate(const unsigned char *image, uint64_t size, const char
     *window = 0;
     for (size_t i = 0; game && i < sizeof(kBuilds) / sizeof(*kBuilds); ++i) {
         if (strcmp(game, kBuilds[i].game)) continue;
-        if (kBuilds[i].window) *window = window_at(image, size, kBuilds[i].window) ? kBuilds[i].window : 0;
-        else *window = find_window(image, size);
+        if (kBuilds[i].window == SEARCHED) *window = find_window(image, size);
+        else *window = window_at(image, size, kBuilds[i].window) ? kBuilds[i].window : 0;
         return 1;
     }
     return 0;

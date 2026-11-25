@@ -288,10 +288,6 @@ constexpr GameBuild kGameBuilds[] = {
         true,
         false,
         true,
-        true,
-        true,
-        false,
-        false,
     },
     {
         "CUSA10487",
@@ -317,7 +313,6 @@ constexpr GameBuild kGameBuilds[] = {
         true,
         true,
         true,
-        false,
     },
 };
 

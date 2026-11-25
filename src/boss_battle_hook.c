@@ -10,6 +10,7 @@
 #include "online_prompt.h"
 
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1673,8 +1674,357 @@ static const char *check_campaign(const unsigned char *image, uint64_t size, con
     return NULL;
 }
 
+/* ---- the builds without a site table ---- */
+
+static const char *const kSearchedBuilds[] = {"CUSA10209-1.02", "CUSA10487-1.03"};
+
+typedef struct {
+    BuildSites sites;
+    uint64_t options_act2, page_fill, results_acts, pause_helper, pause_helper_quit, pause_dispatch;
+} Search;
+
+/* A shape that appears exactly once; entries of one field are its alternative shapes. */
+typedef struct {
+    const char *name;
+    size_t field;
+    unsigned bias;
+    int optional;
+    const short *shape;
+    size_t count;
+} SearchShape;
+
+#define COUNT(a) (sizeof(a) / sizeof(*(a)))
+#define FIND_AT(name, bias, shape) {#name, offsetof(Search, name), bias, 0, shape, COUNT(shape)}
+#define FIND(name, shape) FIND_AT(name, 0, shape)
+#define FIND_OPTIONAL(name, shape) {#name, offsetof(Search, name), 0, 1, shape, COUNT(shape)}
+
+static const SearchShape kSearchShapes[] = {
+    FIND(sites.dispatcher, kDispatcher),
+    FIND(sites.frame_tail, kFrameTail),
+    FIND(sites.stage_end, kStageEnd),
+    FIND(sites.stage_end, kStageEndCompact),
+    FIND(sites.stage_end_steps, kStageEndSteps),
+    FIND(sites.stage_end_steps, kStageEndStepsCompact),
+    FIND(sites.request, kRequest),
+    FIND(sites.inn_built_block, kInnBuilt),
+    FIND(sites.inn_built_block, kInnBuiltAsia),
+    FIND(sites.inn_result_block, kInnResult),
+    FIND(sites.inn_help_block, kInnHelp),
+    FIND(sites.inn_flush_block, kInnFlush),
+    FIND(sites.inn_draw_block, kInnDraw),
+    FIND(sites.arrange_block, kArrangeStory),
+    FIND(sites.story_clear_block, kStoryClear),
+    FIND(sites.labyrinth_select, kLabyrinthSelect),
+    FIND(sites.dragon_block, kDragonTalismans),
+    FIND(sites.title_case, kTitleCase),
+    FIND(sites.save_copy_block, kSaveCopy),
+    FIND(sites.save_allocation, kSaveAllocation),
+    FIND(sites.play_data_allocation, kPlayDataAllocation),
+    FIND(sites.gauge_getter, kGaugeGetter),
+    FIND(sites.wipe_block, kPartyWipe),
+    FIND(sites.wipe_block, kPartyWipeCompact),
+    FIND(sites.boss_clear_block, kBossClear),
+    FIND(sites.clear_screen_block, kClearScreen),
+    FIND(sites.clear_screen_block, kClearScreenCompact),
+    FIND(sites.results_screen_block, kResultsScreen),
+    FIND(sites.results_screen_block, kResultsScreenCompact),
+    FIND(sites.town_return_block, kTownReturn),
+    FIND(sites.town_return_block, kTownReturnCompact),
+    FIND(sites.options_open_block, kOptionsOpen),
+    FIND(sites.options_setup_title, kOptionsTitle),
+    FIND(sites.options_setup_built, kOptionsBuilt),
+    FIND(sites.options_update_block, kOptionsUpdate),
+    FIND(sites.options_result_block, kOptionsResult),
+    FIND(options_act2, kOptionsAct2),
+    FIND(page_fill, kPageFill),
+    FIND(results_acts, kResultsActs),
+    FIND(sites.set_level, kSetLevel),
+    FIND(sites.level_pattern, kLevelPattern),
+    FIND(sites.write_stats, kWriteStats),
+    FIND_OPTIONAL(sites.pause_start_gate, kStartGate),
+    FIND_AT(sites.pause_level_gate, 4, kLevelGate),
+    FIND(sites.pause_mode, kPauseMode),
+    FIND_OPTIONAL(pause_helper, kPauseRow),
+    FIND_OPTIONAL(pause_helper_quit, kPauseQuitRow),
+    FIND_OPTIONAL(pause_dispatch, kPauseDispatchInline),
+    FIND_AT(sites.pause_confirm_text, 0x3f, kPauseConfirmMode),
+    FIND_AT(sites.pause_result, kPauseResultCallAt, kPauseResult),
+    FIND_AT(sites.pause_floor_reward, kFloorRewardCallAt, kFloorRewardCall),
+    FIND(sites.network_close_path, kNetworkClosePath),
+    FIND(sites.network_confirm, kNetworkConfirmPath),
+    FIND_AT(sites.network_back_query, kBackQueryCall, kNetworkBackQuery),
+    FIND(sites.room_info_block, kRoomInfoSlot),
+    FIND_AT(sites.join_state_call, kJoinStateCall, kJoinState),
+    FIND(sites.location_card, kCardLocation),
+    FIND(sites.add_player, kAddPlayer),
+    FIND(sites.slot_request, kSlotRequest),
+    FIND_OPTIONAL(sites.inn_layer_block, kInnLayer),
+    FIND_OPTIONAL(sites.inn_layer_tail_block, kInnLayerTail),
+    FIND_OPTIONAL(sites.town_background_block, kTownBackground),
+    FIND_OPTIONAL(sites.town_background_block, kTownBackgroundGlobals),
+    FIND_OPTIONAL(sites.inn_cursor_art_block, kInnCursorArt),
+    FIND_OPTIONAL(sites.inn_cursor_art_block, kInnCursorArtGlobals),
+    FIND_OPTIONAL(sites.inn_root_part_block, kInnRootPart),
+};
+
+static uint64_t *search_field(Search *s, size_t field) {
+    return (uint64_t *)((unsigned char *)s + field);
+}
+
+static const char *search_shapes(const unsigned char *image, uint64_t size, Search *s) {
+    unsigned char matches[sizeof(Search) / sizeof(uint64_t)] = {0}, first[256][COUNT(kSearchShapes)], firsts[256] = {0};
+    for (size_t i = 0; i < COUNT(kSearchShapes); ++i) {
+        const unsigned char byte = (unsigned char)kSearchShapes[i].shape[0];
+        first[byte][firsts[byte]++] = (unsigned char)i;
+    }
+    for (uint64_t at = 0; at < size; ++at) {
+        for (unsigned k = 0; k < firsts[image[at]]; ++k) {
+            const SearchShape *shape = &kSearchShapes[first[image[at]][k]];
+            if (!shape_at(image, size, at, shape->shape, shape->count)) continue;
+            unsigned char *found = &matches[shape->field / sizeof(uint64_t)];
+            if (*found < 2) ++*found;
+            *search_field(s, shape->field) = at + shape->bias;
+        }
+    }
+    for (size_t i = 0; i < COUNT(kSearchShapes); ++i) {
+        const SearchShape *shape = &kSearchShapes[i];
+        if (matches[shape->field / sizeof(uint64_t)] == 1) continue;
+        if (!shape->optional) return shape->name;
+        *search_field(s, shape->field) = 0;
+    }
+    return NULL;
+}
+
+typedef int (*SearchTest)(const unsigned char *image, uint64_t size, uint64_t at, const void *context);
+
+/* The one place in [from, to) where the shape and the test hold; 0 when there is none or more than one. */
+static uint64_t search_once(const unsigned char *image, uint64_t size, uint64_t from, uint64_t to, const short *shape,
+                            size_t count, SearchTest test, const void *context) {
+    uint64_t found = 0;
+    for (uint64_t at = from; at < to && at < size; ++at) {
+        if (image[at] != (unsigned char)shape[0] || !shape_at(image, size, at, shape, count)) continue;
+        if (test && !test(image, size, at, context)) continue;
+        if (found) return 0;
+        found = at;
+    }
+    return found;
+}
+#define SEARCH_ONCE(from, to, shape, test, context) search_once(image, size, from, to, shape, COUNT(shape), test, context)
+
+/* The vtable whose entry `slot` is `function`, the only one that holds it. */
+static uint64_t vtable_with(const unsigned char *image, uint64_t size, uint64_t function, uint64_t slot) {
+    uint64_t found = 0;
+    for (uint64_t at = slot; at + 8 <= size; at += 8) {
+        uint64_t value;
+        if (!image_pointer(image, size, at, &value) || value != function) continue;
+        if (found) return 0;
+        found = at - slot;
+    }
+    return found;
+}
+
+/* The calls of `function`; returns how many there are, which may be more than `max`. */
+static int calls_of(const unsigned char *image, uint64_t size, uint64_t function, uint64_t *calls, int max) {
+    int count = 0;
+    for (uint64_t at = 0; at + HOOK_LENGTH <= size; ++at) {
+        if (image[at] != 0xe8 || call_target(image, at) != function) continue;
+        if (count < max) calls[count] = at;
+        ++count;
+    }
+    return count;
+}
+
+/* Every round accessor that names the rounds reads one table. */
+static uint64_t search_round_entry(const unsigned char *image, uint64_t size) {
+    uint64_t found = 0, table = 0;
+    for (uint64_t at = 0; at + COUNT(kRoundEntry) <= size; ++at) {
+        if (image[at] != kRoundEntry[0] || !SHAPE(image, size, at, kRoundEntry) || check_rounds(image, size, at)) continue;
+        const int64_t slot = rel32_target(image, at + kRoundSlotDisp, at + COUNT(kRoundEntry) - 1);
+        uint64_t read;
+        if (!image_pointer(image, size, (uint64_t)slot, &read) || (found && read != table)) return 0;
+        if (!found) found = at;
+        table = read;
+    }
+    return found;
+}
+
+static uint64_t constructor_vtable(const unsigned char *image, uint64_t constructor) {
+    const uint64_t lea = constructor + kInnConstructorVtableLea;
+    return (uint64_t)rel32_target(image, lea + 3, lea + 7) + 0x10;
+}
+
+static int constructs_inn(const unsigned char *image, uint64_t size, uint64_t at, const void *context) {
+    const BuildSites *b = context;
+    const uint64_t vtable = constructor_vtable(image, at);
+    uint64_t builder, update;
+    return within(b->inn_flush_block, at, INN_CONSTRUCTOR_SPAN) && image_pointer(image, size, vtable + INN_VTABLE_BUILD, &builder) &&
+           image_pointer(image, size, vtable + INN_VTABLE_UPDATE, &update) && within(b->inn_built_block, builder, INN_BUILDER_SPAN) &&
+           within(b->inn_result_block, update, INN_UPDATE_SPAN);
+}
+
+static int sends_inn_party(const unsigned char *image, uint64_t size, uint64_t at, const void *context) {
+    (void)context;
+    return SHAPE(image, size, call_target(image, at + kLeavePartyCall), kInnParty);
+}
+
+static int sets_row_frame(const unsigned char *image, uint64_t size, uint64_t at, const void *context) {
+    (void)context;
+    const uint64_t part_set = at + kPartSetJump + HOOK_LENGTH <= size ? jump_target(image, at + kPartSetJump) : 0;
+    if (!part_set || part_set + kPartLayersCall + HOOK_LENGTH > size) return 0;
+    const uint64_t layers = call_target(image, part_set + kPartLayersCall);
+    return layers && SHAPE(image, size, layers + kPartLayersPastEntry, kPartLayers);
+}
+
+static int plays_cues(const unsigned char *image, uint64_t size, uint64_t at, const void *context) {
+    (void)context;
+    if (at + kCueLookupInPlayer + HOOK_LENGTH > size) return 0;
+    BuildSites b = {0};
+    BossBattleSites sites;
+    b.cue_player = at;
+    return !check_cues(image, size, &b, &sites);
+}
+
+static int builds_quit_row(const unsigned char *image, uint64_t size, uint64_t at, const void *context) {
+    (void)image, (void)size;
+    return within(((const BuildSites *)context)->pause_quit_row, at, 0x400);
+}
+
+static const char *search_inn(const unsigned char *image, uint64_t size, BuildSites *b) {
+    b->inn_constructor = SEARCH_ONCE(0, size, kInnConstructor, constructs_inn, b);
+    if (!b->inn_constructor) return "Inn constructor";
+    b->inn_vtable = constructor_vtable(image, b->inn_constructor);
+    if (!image_pointer(image, size, b->inn_vtable + INN_VTABLE_BUILD, &b->inn_builder) ||
+        !image_pointer(image, size, b->inn_vtable + INN_VTABLE_UPDATE, &b->inn_update) ||
+        !image_pointer(image, size, b->inn_vtable + INN_VTABLE_LEAVE, &b->leave_mode))
+        return "Inn vtable";
+    const uint64_t leave_end = b->leave_mode + LEAVE_SPAN;
+    b->leave_party_block = SEARCH_ONCE(b->leave_mode, leave_end, kLeaveParty, sends_inn_party, NULL);
+    b->leave_save_block = SEARCH_ONCE(b->leave_mode, leave_end, kLeaveSave, NULL, NULL);
+    return b->leave_party_block && b->leave_save_block ? NULL : "Inn Leave mode";
+}
+
+/* The list classes that share the Inn list's draw also share the row check its calls reach. */
+static const char *search_list(const unsigned char *image, uint64_t size, BuildSites *b, uint64_t *is_disabled) {
+    const uint64_t draw = call_target(image, b->inn_draw_block + kInnDrawCall);
+    for (uint64_t at = LIST_VTABLE_DRAW; draw && at + 8 <= size; at += 8) {
+        uint64_t value, check;
+        if (!image_pointer(image, size, at, &value) || value != draw) continue;
+        const uint64_t vtable = at - LIST_VTABLE_DRAW;
+        if (!image_pointer(image, size, vtable + LIST_VTABLE_IS_DISABLED, &check) || (b->list_vtable && check != *is_disabled))
+            return "Inn list vtable";
+        if (!b->list_vtable) b->list_vtable = vtable;
+        *is_disabled = check;
+    }
+    return b->list_vtable ? NULL : "Inn list vtable";
+}
+
+static int inn_row_target(const unsigned char *image, uint64_t size, uint64_t target, uint64_t is_disabled) {
+    return target && (target == is_disabled || SHAPE(image, size, target, kListSetCursor) || SHAPE(image, size, target, kListSetDisabled));
+}
+
+/* Each row call is in the Inn's code once, and no other call there passes a row from 3 to 5. */
+static const char *search_inn_calls(const unsigned char *image, uint64_t size, BuildSites *b, uint64_t is_disabled) {
+    enum { ROW_CALL_REACH = 22, ROW_CALL_BYTES = 32 };
+    const uint64_t end = b->inn_update + INN_UPDATE_SPAN;
+    if (b->inn_constructor >= b->inn_update || end + ROW_CALL_BYTES > size) return "Inn code";
+    int found[INN_CALLS] = {0}, rows = 0;
+    for (uint64_t at = b->inn_constructor; at < end; ++at) {
+        if (image[at] != 0xbe || image[at + 1] < 3 || image[at + 1] > 5 || image[at + 2] || image[at + 3] || image[at + 4]) continue;
+        for (int i = 0; i < INN_CALLS; ++i) {
+            if (!inn_call_matches(image, size, at, &kInnCalls[i]) ||
+                !inn_row_target(image, size, call_target(image, at + kInnCalls[i].length - 1), is_disabled))
+                continue;
+            ++found[i];
+            b->inn_calls[i] = at;
+        }
+        for (int k = HOOK_LENGTH; k < ROW_CALL_REACH; ++k) {
+            if (!inn_row_target(image, size, call_target(image, at + k), is_disabled)) continue;
+            ++rows;
+            break;
+        }
+    }
+    for (int i = 0; i < INN_CALLS; ++i)
+        if (found[i] != 1) return "Inn row calls";
+    return rows == INN_CALLS ? NULL : "Inn row calls";
+}
+
+static const char *search_pause(const unsigned char *image, uint64_t size, Search *s) {
+    BuildSites *b = &s->sites;
+    if (!b->pause_start_gate && shared_start_gate && image[shared_start_gate] == 0xe9) b->pause_start_gate = shared_start_gate;
+    if (s->pause_helper && s->pause_helper_quit) {
+        b->pause_row = s->pause_helper;
+        b->pause_quit_row = s->pause_helper_quit + 0x12;
+    } else if (!s->pause_helper && s->pause_dispatch) {
+        b->pause_row = s->pause_dispatch + kPauseDispatchJump;
+        b->pause_quit_row = b->pause_row + PAUSE_DISPATCH_LENGTH + COUNT(kPausePlainRowInline);
+    } else {
+        return "pause menu rows";
+    }
+    b->pause_setup = SEARCH_ONCE(0, size, kPauseSetup, builds_quit_row, b);
+    if (!b->pause_setup) return "pause menu setup";
+    return calls_of(image, size, b->pause_setup, b->pause_setup_calls, 3) == 3 ? NULL : "pause menu setup calls";
+}
+
+/* A row's message loads are all in one row's code, which reaches the list's widget add. */
+static uint64_t search_network_row(const unsigned char *image, uint64_t size, const short *message, size_t count, uint64_t add) {
+    uint64_t first = 0, last = 0;
+    for (uint64_t at = 0; at + count <= size; ++at) {
+        if (image[at] != (unsigned char)message[0] || !shape_at(image, size, at, message, count)) continue;
+        if (!reaches_function(image, size, at, NETWORK_ROW_SPAN, add, 1) || (first && at - first >= NETWORK_ROW_SPAN)) return 0;
+        if (!first) first = at;
+        last = at;
+    }
+    return last;
+}
+
+/* The scene's two party slot lookups, one on each side of its party down check. */
+static const char *search_party_slots(const unsigned char *image, uint64_t size, BuildSites *b) {
+    enum { PARTY_PASS_REACH = 0x200 };
+    if (b->wipe_block < PARTY_PASS_REACH || b->wipe_block + PARTY_PASS_REACH + HOOK_LENGTH > size)
+        return "online party slot lookups";
+    int count[2] = {0};
+    for (uint64_t at = b->wipe_block - PARTY_PASS_REACH; at < b->wipe_block + PARTY_PASS_REACH; ++at) {
+        const uint64_t lookup = call_target(image, at);
+        if (!lookup || !party_slot_call_at(image, size, at, lookup)) continue;
+        const int after = at > b->wipe_block;
+        b->party_slot_calls[after] = at;
+        ++count[after];
+    }
+    return count[0] == 1 && count[1] == 1 ? NULL : "online party slot lookups";
+}
+
+static const char *search_sites(const unsigned char *image, uint64_t size, Search *s) {
+    BuildSites *b = &s->sites;
+    const char *why = search_shapes(image, size, s);
+    if (why) return why;
+    if (!(b->round_entry = search_round_entry(image, size))) return "round table entry";
+    if (!(b->scene_vtable = vtable_with(image, size, b->dispatcher, VTABLE_DISPATCH))) return "scene vtable";
+    if ((why = search_inn(image, size, b))) return why;
+    uint64_t is_disabled = 0;
+    if ((why = search_list(image, size, b, &is_disabled))) return why;
+    if ((why = search_inn_calls(image, size, b, is_disabled))) return why;
+    const uint64_t title = call_target(image, b->title_case + kTitleCall);
+    if (!title || !SHAPE(image, size, title, kTitleConstructor)) return "title scene constructor";
+    b->title_vtable = (uint64_t)rel32_target(image, title + kTitleVtableLea + 3, title + kTitleVtableLea + 7);
+    uint64_t act_call;
+    if (calls_of(image, size, s->options_act2, &act_call, 1) != 1 || act_call < kOptionsAct2Call ||
+        !(b->options_window_vtable = vtable_with(image, size, act_call - kOptionsAct2Call, OPTIONS_VTABLE_ACT)))
+        return "Options window";
+    if (!(b->options_body_vtable = vtable_with(image, size, s->page_fill, LIST_VTABLE_FILL))) return "Options list";
+    if (!(b->row_frame = SEARCH_ONCE(0, size, kRowFrame, sets_row_frame, NULL))) return "row frame setter";
+    if (!(b->results_window_vtable = vtable_with(image, size, s->results_acts, RESULTS_VTABLE_ACT))) return "results window";
+    if (!(b->cue_player = SEARCH_ONCE(0, size, kCuePlayer, plays_cues, NULL))) return "cue player";
+    if ((why = search_pause(image, size, s))) return why;
+    const uint64_t add = call_target(image, b->inn_built_block + kInnAddWidgetCall);
+    if (!add) return "Inn menu functions";
+    b->network_return_row = search_network_row(image, size, kNetworkReturnRowMessage, COUNT(kNetworkReturnRowMessage), add);
+    b->network_end_row = search_network_row(image, size, kNetworkEndRowMessage, COUNT(kNetworkEndRowMessage), add);
+    if (!b->network_return_row || !b->network_end_row) return "Network Menu rows";
+    return search_party_slots(image, size, b);
+}
+
 static const BuildSites *listed_build(const char *game) {
-    for (size_t i = 0; game && i < sizeof(kBuilds) / sizeof(*kBuilds); ++i)
+    for (size_t i = 0; game && i < COUNT(kBuilds); ++i)
         if (!strcmp(game, kBuilds[i].game)) return &kBuilds[i];
     return NULL;
 }
@@ -1683,11 +2033,13 @@ int boss_battle_build_listed(const char *game) {
     return listed_build(game) != NULL;
 }
 
-int boss_battle_locate(const unsigned char *image, uint64_t size, const char *game, BossBattleSites *sites,
-                       const char **why) {
-    const BuildSites *b = listed_build(game);
-    *why = "no site table verified on this build's executable";
-    if (!b) return 0;
+int boss_battle_build_searched(const char *game) {
+    for (size_t i = 0; game && i < COUNT(kSearchedBuilds); ++i)
+        if (!strcmp(game, kSearchedBuilds[i])) return 1;
+    return 0;
+}
+
+static int verify_sites(const unsigned char *image, uint64_t size, const BuildSites *b, BossBattleSites *sites, const char **why) {
     if ((*why = check_scene(image, size, b))) return 0;
     if (!SHAPE(image, size, b->request, kRequest)) return *why = "scene request builder", 0;
     if ((*why = check_rounds(image, size, b->round_entry))) return 0;
@@ -1717,6 +2069,22 @@ int boss_battle_locate(const unsigned char *image, uint64_t size, const char *ga
     if ((*why = check_progression(image, size, b, &found))) return 0;
     *sites = found;
     return 1;
+}
+
+int boss_battle_search(const unsigned char *image, uint64_t size, BossBattleSites *sites, const char **why) {
+    Search search;
+    memset(&search, 0, sizeof(search));
+    if ((*why = search_sites(image, size, &search))) return 0;
+    return verify_sites(image, size, &search.sites, sites, why);
+}
+
+int boss_battle_locate(const unsigned char *image, uint64_t size, const char *game, BossBattleSites *sites,
+                       const char **why) {
+    const BuildSites *b = listed_build(game);
+    if (b) return verify_sites(image, size, b, sites, why);
+    if (boss_battle_build_searched(game)) return boss_battle_search(image, size, sites, why);
+    *why = "not a supported build";
+    return 0;
 }
 
 enum { FIXED_HOOKS = 57, HOOKS = FIXED_HOOKS + INN_CALLS, FUNCTION_ENTRY_LENGTH = 6 };
@@ -5052,8 +5420,8 @@ int boss_battle_install(unsigned char *image, uint64_t size, uint64_t entry, con
         boss_battle_online_set_available(handoff && online_prompt_configured());
         boss_battle_online_set_hosting(boss_battle_enabled());
     }
-    printf("Boss Battle: installed, %d of %d encounters, %s (%s)%s\n", boss_battle_startable_count(), BOSS_BATTLE_ENCOUNTERS,
-           boss_battle_enabled() ? "enabled" : "disabled", game,
+    printf("Boss Battle: installed, %d of %d encounters, %s (%s%s)%s\n", boss_battle_startable_count(), BOSS_BATTLE_ENCOUNTERS,
+           boss_battle_enabled() ? "enabled" : "disabled", game, boss_battle_build_searched(game) ? ", sites found by signature" : "",
            !online ? "" : boss_battle_online_available() ? ", Boss Battle Online ready" : ", Boss Battle Online unavailable");
     return 1;
 }

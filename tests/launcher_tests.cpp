@@ -392,6 +392,53 @@ void TestFingerprintMatchesProfile() {
     CHECK(profile.find(modules + ")") != std::string::npos);
 }
 
+void TestArchivePatchesOfEveryBuild(const fs::path& base);
+
+// One identity per build, in every place that names the builds, and no build plays another region's resources.
+void TestBuildIdentities(const fs::path& base) {
+    const fs::path source(DCP_SOURCE_DIR);
+    const std::string portuguese = ReadAll(source / "scripts" / "localization" / "ptbr.py");
+    const std::string russian = ReadAll(source / "scripts" / "localization" / "russian.py");
+    const std::string readme = ReadAll(source / "README.md");
+    const std::string guide = ReadAll(source / "docs" / "LAUNCHER.md");
+    const std::string packaging = ReadAll(source / "packaging" / "README.txt") + ReadAll(source / "packaging" / "README-linux.txt");
+    const std::string prepare = ReadAll(source / "tools" / "prepare-game.ps1");
+    std::set<std::string> hashes, folders, keys, finished;
+    for (const GameBuild& build : SupportedBuilds()) {
+        const std::string sha = build.eboot_sha256, title = build.title_id, label = build.label;
+        CHECK(sha.size() == 64 && sha.find_first_not_of("0123456789abcdef") == std::string::npos);
+        CHECK(hashes.insert(sha).second && folders.insert(build.folder).second && keys.insert(BuildKey(build)).second);
+        CHECK(finished.insert(title + FinishedLayer(build).app_ver + FinishedLayer(build).sfo_version).second);
+        CHECK(readme.find(sha) != std::string::npos && guide.find("`" + std::string(build.folder) + "`") != std::string::npos);
+        CHECK(portuguese.find("'" + label + "': ('" + build.folder + "', ") != std::string::npos);
+        CHECK(russian.find("'" + label + "': ('" + build.folder + "', ") != std::string::npos);
+        CHECK(packaging.find(title) != std::string::npos && prepare.find("'" + title + "'") != std::string::npos);
+
+        const std::string own = build.regional_archive ? build.regional_archive : "";
+        const std::string_view played = build.translation->archive;
+        CHECK(played == own || played == "DRACRO.CPK");
+        for (const GameBuild& other : SupportedBuilds()) {
+            const bool same_title = title == other.title_id;
+            CHECK(same_title == (build.translation == other.translation));
+            if (!same_title && other.regional_archive) CHECK(own != other.regional_archive && played != other.regional_archive);
+        }
+
+        // The image report resolves to this build alone; another build's hash or title resolves to nothing.
+        const fs::path report = base / "build-identities";
+        for (const GameBuild& hash_of : SupportedBuilds()) {
+            WriteAll(report / "image.json", "{\n  \"title_id\": \"" + title + "\",\n  \"eboot_sha256\": \"" + hash_of.eboot_sha256 +
+                                                "\",\n  \"app_ver\": \"" + FinishedLayer(hash_of).app_ver + "\"\n}");
+            DcpGameBuild game{};
+            const bool named = dcp_game_build(report.string().c_str(), &game) == 1;
+            CHECK(named == (title == hash_of.title_id));
+            if (named) CHECK(std::string(game.label) == hash_of.label);
+        }
+        CHECK(!RestrictedToNativeResolution(&build) && CheatsAvailable(&build) && TrueUltrawideAvailable(&build) &&
+              UnlockGalleryAvailable(&build) && BossBattleAvailable(&build) && SupportsVoiceLanguage(&build));
+    }
+    CHECK(hashes.size() == 8);
+}
+
 void TestSettings(const fs::path& base) {
     const fs::path file = base / "settings" / "dcp.ini";
     fs::remove_all(file.parent_path());
@@ -2456,14 +2503,11 @@ void TestEnableBossBattleSettings(const fs::path& base) {
     WriteAll(file, "enable_boss_battle = banana\n");
     CHECK(dcp_enable_boss_battle(file.string().c_str()) == 0);
 
-    int offered = 0;
-    for (const GameBuild& build : SupportedBuilds()) {
-        const std::string_view label = build.label;
-        const bool unchecked = label == "CUSA10209 1.02 Asia/Hong Kong" || label == "CUSA10487 1.03 Europe";
-        CHECK(BossBattleAvailable(&build) == !unchecked);
-        offered += BossBattleAvailable(&build);
-    }
-    CHECK(offered == int(SupportedBuilds().size()) - 2 && BossBattleAvailable(nullptr));
+    for (const GameBuild& build : SupportedBuilds()) CHECK(BossBattleAvailable(&build));
+    CHECK(BossBattleAvailable(nullptr));
+    GameBuild unlisted = SupportedBuilds().front();
+    unlisted.boss_battle = false;
+    CHECK(!BossBattleAvailable(&unlisted));
 
     const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
     const std::string gated = "if (BossBattleAvailable(build_)) {\n            ui.Toggle(\"Enable Boss Battle\", kEnableBossBattleHelp, "
@@ -7547,6 +7591,41 @@ std::span<const uint8_t> Span(const std::string& s) { return {reinterpret_cast<c
 
 } // namespace cpk_test
 
+// Xbox prompts and Arachnophobia Safe Mode on fake archives laid out as each build has them: both go in and come out.
+void TestArchivePatchesOfEveryBuild(const fs::path& base) {
+    using namespace cpk_test;
+    std::string atlas(20480, '\0'), pack(24576, '\0'), spider(20480, '\0');
+    for (size_t i = 0; i < atlas.size(); ++i) atlas[i] = char((i * 7 + i / 64) & 255);
+    for (size_t i = 0; i < pack.size(); ++i) pack[i] = char((i * 13 + i / 32) & 255);
+    for (size_t i = 0; i < spider.size(); ++i) spider[i] = char((i * 5 + i / 16) & 255);
+    const auto changed = [](std::string text, char fill) { return text.replace(0x340, 16, 16, fill); };
+    const std::string xbox = MakePatch({{"stage/Interface.ftx", {atlas, changed(atlas, 'X')}}, {"stage/Interface_US.ftx", {pack, changed(pack, 'Y')}}});
+    const std::string safe = MakePatch({{kSpiderEntry, {spider, changed(spider, 'S')}}});
+    for (const GameBuild& build : SupportedBuilds()) {
+        const fs::path app0 = base / "archives" / build.folder;
+        fs::create_directories(app0);
+        WriteAll(app0 / "DRACRO.CPK", BuildCpk({{"stage/Interface.ftx", atlas, true}, {kSpiderEntry, spider, false}}, true));
+        const bool western = build.text_languages.front().key == kEnglishKey;
+        if (build.regional_archive)
+            WriteAll(app0 / build.regional_archive, western ? BuildCpk({{"stage/Interface_US.ftx", pack, true}}, true)
+                                                            : BuildCpk({{"msgsheet/x.fms", "FMSB" + std::string(600, '\0'), true}}, false));
+        CHECK(XboxPromptsAvailable(app0, build, Span(xbox)));
+        CHECK(PromptArchives(app0, build).size() == (western ? 2u : 1u));
+        CHECK(SetGamePatches(app0, build, PromptStyle::kXbox, true, Span(xbox), Span(safe)).ok);
+        CHECK(InstalledPromptStyle(app0, build, Span(xbox)) == PromptStyle::kXbox);
+        {
+            CpkArchive archive;
+            CHECK(archive.Open(app0 / "DRACRO.CPK") && Bytes(archive.Read(*archive.Find(kSpiderEntry))) == changed(spider, 'S'));
+            CHECK(Bytes(archive.Read(*archive.Find("stage/Interface.ftx"))) == changed(atlas, 'X'));
+        }
+        CHECK(SetGamePatches(app0, build, PromptStyle::kPlayStation, false, Span(xbox), Span(safe)).ok);
+        CHECK(InstalledPromptStyle(app0, build, Span(xbox)) == PromptStyle::kPlayStation);
+        CpkArchive archive;
+        CHECK(archive.Open(app0 / "DRACRO.CPK") && Bytes(archive.Read(*archive.Find(kSpiderEntry))) == spider &&
+              Bytes(archive.Read(*archive.Find("stage/Interface.ftx"))) == atlas);
+    }
+}
+
 void TestControllerPrompts(const fs::path& base) {
     using namespace cpk_test;
     // The setting and its labels.
@@ -12152,6 +12231,16 @@ void TestLauncherLanguageIsolation(const fs::path& base) {
         }
     }
     CHECK(LauncherDisplayLanguage(&kCk100, english).suffix == "CT" && LauncherDisplayLanguage(&kCk100, english).translation == kPortEnglish);
+    // An update shows what its base shows: the same archive, the same entries, the same font and corpus.
+    size_t updates = 0;
+    for (const GameBuild& build : SupportedBuilds()) {
+        const GameBuild* from = BaseBuildOf(build);
+        if (!from) continue;
+        ++updates;
+        CHECK(build.translation == from->translation && build.text_languages.data() == from->text_languages.data());
+        for (const std::string_view key : {english, portuguese}) CHECK(&LauncherDisplayLanguage(&build, key) == &LauncherDisplayLanguage(from, key));
+    }
+    CHECK(updates == 4 && BaseBuildOf(kCk) == &kCk100);
     CHECK(LauncherDisplayLanguage(&kUs, english).suffix == "US" && LauncherDisplayLanguage(&kUs, english).translation.empty());
     CHECK(LauncherDisplayLanguage(&kJp100, english).translation == kPortEnglish && LauncherDisplayLanguage(nullptr, portuguese).key == english);
 
@@ -12401,6 +12490,42 @@ int main(int argc, char** argv) {
         std::printf("GROUP|launcher-language|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    if (argc == 2 && std::string(argv[1]) == "build-profiles") {
+        const fs::path base = fs::temp_directory_path() / ("dcp_launcher_profiles_" + std::to_string(getpid()));
+        fs::remove_all(base);
+        fs::create_directories(base);
+        TestFingerprintMatchesProfile();
+        TestBuildIdentities(base);
+        TestControllerPrompts(base);
+        TestArchivePatchesOfEveryBuild(base);
+        TestSafeMode(base);
+        TestFrameRate(base);
+        TestAspectRatio(base);
+        TestTrueUltrawide(base);
+        TestInstalledTextLanguages(base);
+        TestTextLanguageSwitching(base);
+        TestVoiceLanguageResources(base);
+        TestTranslationAcrossSlots(base);
+        TestRenderResolution(base);
+        TestResolutionProbe();
+        TestVoiceLanguageSetting(base);
+        TestEnableBossBattleSettings(base);
+        TestPinnedBuild(base);
+        TestKeepBaseLanguages(base);
+        TestBuilds(base);
+        TestCusa10209Graphics(base);
+        TestUs101Graphics(base);
+        TestBuildMetadata();
+        TestLayers(base);
+        TestUsBuild();
+        TestEuropeBuild(base);
+        TestLauncherLanguageIsolation(base);
+        std::error_code ec;
+        fs::remove_all(base, ec);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-build-profiles|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "connection-test") {
         TestLauncherLocalization();
         TestTextWithValues();
@@ -12436,6 +12561,7 @@ int main(int argc, char** argv) {
     TestSha256AndJson(base);
     TestGameFiles(base);
     TestFingerprintMatchesProfile();
+    TestBuildIdentities(base);
     TestSettings(base);
     TestPaths();
     TestLogNumbering(base);
@@ -12531,6 +12657,7 @@ int main(int argc, char** argv) {
     TestMouseSettings(base);
     TestFileBrowser(base);
     TestControllerPrompts(base);
+    TestArchivePatchesOfEveryBuild(base);
     TestInstalledTextLanguages(base);
     TestTextLanguageSwitching(base);
     TestBuiltInEnglish(base);

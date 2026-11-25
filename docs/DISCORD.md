@@ -49,7 +49,8 @@ by archive and offset, the activity text and that it names no art, level and cla
 observer changes nothing about a read, overlaid or not, and sees only successful ones.
 
 Checked once against local game data: all 28 places exist under the same names in the archives of CUSA10454 1.00,
-CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00. CUSA10454 1.01, CUSA10209 1.02 and CUSA10487 1.03 were not available.
+CUSA07001 1.00, 1.02 and 1.03 and CUSA10209 1.00. CUSA10454 1.01, CUSA10209 1.02 and CUSA10487 1.03 were not available. A
+CUSA10209 1.02 log (issue #14) shows the title screen, the town and Dragon's Haven Inn named in play.
 
 Reported by the contributor from play on Windows, CUSA10454 1.00, with an earlier image-based presence under another
 application: class, level, title, town, buildings, all nine stages, Lost Zone, Labyrinth of Chaos and camp.
