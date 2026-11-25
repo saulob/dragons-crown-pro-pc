@@ -48,6 +48,14 @@
   Builds and runs only the DCP-F8K2Q7 Gamescope black screen and frame pacing regression (dcp-present-tests: swap queue backlog,
   flip gate, swapchain and presenter lifecycle; dcp-frame-pacing-tests: repeat cadence, limiter, repeat and flip timing simulation,
   SlotBelongsToNextTick) and reports their result alone. No game, no window, no GPU. The normal run includes both.
+.PARAMETER TouchscreenMode
+  Builds and runs only the DCP-T7M4KC touchscreen mode regression (dcp-touch-absolute-tests: the mode setting, the option-read
+  sites in every local boot image, local two-player isolation, the screen-to-surface mapping, wiring and refusals; the
+  touchscreen group of dcp-launcher-tests: default, saved values, reset, Controls page and Portuguese text; the touchscreen
+  group of dcp-build-parity-tests: every feature installed together on each local executable; the SteamOS touchscreen, Steam
+  Deck trackpad, mouse and Options menu suites), compiles the changed production sources with the build's own flags
+  (tests\touchscreen_compile_tests.ps1) and reports their result alone. A build without a local executable is reported
+  BLOCKED. No game, no window, no GPU, no link of the game. The normal run includes the same tests.
 .DESCRIPTION
   The default run is the current focus, K8R3M (issue #86, Kraken Damage Multiplier): the cheat tests with the Kraken damage group
   (dcp-cheats-tests), the Kraken null mast fix (dcp-kraken-fix-tests) and the hook locators (dcp-feature-sites-tests). Every other
@@ -99,7 +107,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor, [switch]$GamescopePacing)
+param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor, [switch]$GamescopePacing, [switch]$TouchscreenMode)
 
 $script:Clock = [Diagnostics.Stopwatch]::StartNew()
 $script:StartClock = [datetime]::Now
@@ -357,7 +365,7 @@ function Invoke-PtBrLocalizationChecks {
 }
 
 $requiredSuites = 'dcp-build-parity-tests', 'dcp-boss-battle-tests', 'dcp-boss-battle-text-tests', 'dcp-boss-battle-menu-tests',
-                  'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-character-highlight-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-endgame-unlocks-tests', 'dcp-thread-lifecycle-tests',
+                  'dcp-boss-battle-record-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-skip-intro-tests', 'dcp-character-highlight-tests', 'dcp-gallery-unlock-tests', 'dcp-kraken-fix-tests', 'dcp-touch-absolute-tests', 'dcp-endgame-unlocks-tests', 'dcp-thread-lifecycle-tests',
                   'dcp-menu-buttons-tests', 'dcp-skip-offers-tests', 'dcp-exit-game-tests', 'dcp-feature-sites-tests',
                   'dcp-launcher-tests', 'dcp-launcher-startup-tests', 'dcp-korean-localization-tests', 'dcp-issue84-tests', 'dcp-item-attack-cap-tests',
                   'dcp-save-editor-tests', 'dcp-save-page-tests', 'dcp-inventory-editor-tests', 'dcp-character-override-tests'
@@ -382,6 +390,7 @@ $tests = @(
     (Test-Step 'Windows crash dump tests (dump path, session log pairing, collision, headless minidump write; no crash, no dialog)' 'dcp-crash-dump-tests'),
     (Test-Step 'cheat tests' 'dcp-cheats-tests' -Parity),
     (Test-Step 'Kraken crash fix tests (tentacle null mast: faulting sequence in every supported build, patch, null path, refusals)' 'dcp-kraken-fix-tests' -Parity),
+    (Test-Step 'Touchscreen mode tests (PS4 Touchpad default, PS Vita Direct Touch hook sites in every local boot image, mode, mapping, tap click, refusals)' 'dcp-touch-absolute-tests' -Parity -Capture),
     (Test-Step 'Voice language tests (issue #69: player, resurrected characters, narrator, NPCs, enemies, allies, all builds; narrator off alone)' 'dcp-voice-tests' -Parity),
     (Test-Step 'online System type hook tests' 'dcp-system-type-tests' -Parity),
     (Test-Step 'online party snapshot tests' 'dcp-party-tests' -Parity),
@@ -465,6 +474,8 @@ $tests = @(
     (Test-Step 'relay source hygiene (no debug logs, no force option, no build or Windows dependency, protocols unchanged)' -Script 'tests\relay_hygiene_tests.ps1'),
     (Test-Step 'online test instance script tests (-Build, with -WhatIf only)' -Script 'tests\online_instance_tests.ps1'),
     (Test-Step 'build.ps1 waits for every loader run (a Windows-subsystem program needs the pipe)' -Script 'tests\build_script_tests.ps1'),
+    (Test-Step 'touchscreen production sources (object compile with the build flags, zero warnings, nothing linked)' -Script 'tests\touchscreen_compile_tests.ps1' -Capture `
+        -Key 'touchscreen production compile' -Arguments @('-BuildDir', $buildDir) -Nominal 40),
     (Test-Step 'online HLE tests (Matching2, libSceNet and Rudp entry points against the loopback lobby)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby -Timing),
     (Test-Step 'online endpoint path, lobby sees global IPv6 (fallback report, late and early STUN, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby -Timing `
         -Key 'endpoint path IPv6' -Arguments @('--endpoint-scenario', '2001:db8:1::10') `
@@ -489,7 +500,7 @@ $defaultFocusSuites = @('dcp-cheats-tests', 'dcp-kraken-fix-tests', 'dcp-feature
 $defaultFocusGroups = [ordered]@{
     'dcp-cheats-tests' = @('GROUP|issue86-kraken-damage|PASS')
 }
-$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor -or $GamescopePacing)
+$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor -or $GamescopePacing -or $TouchscreenMode)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
@@ -500,6 +511,8 @@ $editorReleaseSuites = @('dcp-save-editor-tests', 'dcp-runtime-overlay-tests', '
 $savePageSuites = @('dcp-save-page-tests', 'dcp-save-editor-tests')
 $inventoryEditorSuites = @('dcp-inventory-editor-tests', 'dcp-save-editor-tests')
 $gamescopePacingSuites = @('dcp-present-tests', 'dcp-frame-pacing-tests')
+$touchscreenModeSuites = @('dcp-touch-absolute-tests', 'dcp-touchscreen-steamos-tests', 'dcp-steam-deck-trackpad-tests', 'dcp-mouse-tests',
+                           'dcp-launcher-tests', 'dcp-build-parity-tests', 'dcp-options-menu-tests')
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -547,6 +560,17 @@ if ($BossBattleOnline) {
 } elseif ($GamescopePacing) {
     $tests = @($tests | Where-Object { $gamescopePacingSuites -contains $_.Exe })
     $requiredSuites = $gamescopePacingSuites
+} elseif ($TouchscreenMode) {
+    $tests = @(
+        ($tests | Where-Object { $_.Exe -eq 'dcp-touch-absolute-tests' })
+        (Test-Step 'touchscreen mode settings, Controls page and Portuguese text (dcp-launcher-tests touchscreen)' 'dcp-launcher-tests' -Capture `
+            -Key 'dcp-launcher-tests touchscreen' -Arguments @('touchscreen'))
+        (Test-Step 'touchscreen hooks beside every other feature on each local executable (dcp-build-parity-tests touchscreen)' 'dcp-build-parity-tests' -Capture `
+            -Key 'dcp-build-parity-tests touchscreen' -Arguments @('touchscreen'))
+        ($tests | Where-Object { $_.Key -eq 'touchscreen production compile' -or $_.Script -eq 'tests\build_script_tests.ps1' })
+        ($tests | Where-Object { $_.Exe -in 'dcp-touchscreen-steamos-tests', 'dcp-steam-deck-trackpad-tests', 'dcp-mouse-tests', 'dcp-options-menu-tests' })
+    )
+    $requiredSuites = $touchscreenModeSuites
 } elseif ($EditorRelease) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
     $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Command { Get-LinuxBuildCommand '--editor' } `
@@ -566,8 +590,8 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($GamescopePacing) { & ninja -C $buildDir @gamescopePacingSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
-& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-launcher-startup-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($GamescopePacing) { & ninja -C $buildDir @gamescopePacingSuites } elseif ($TouchscreenMode) { & ninja -C $buildDir @touchscreenModeSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
+& ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-launcher-startup-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-touch-absolute-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
 foreach ($test in $tests) {
@@ -704,6 +728,40 @@ if ($InventoryEditor) {
         exit 1
     }
     Write-Host 'Inventory Editor tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($TouchscreenMode) {
+    $hookLines = @($captured['dcp-touch-absolute-tests'])
+    $touchscreenGroups = [ordered]@{
+        'dcp-touch-absolute-tests' = 'GROUP|touchscreen-hook|PASS'
+        'dcp-launcher-tests touchscreen' = 'GROUP|launcher-touchscreen|PASS'
+        'dcp-build-parity-tests touchscreen' = 'GROUP|parity-touchscreen|PASS'
+        'touchscreen production compile' = 'GROUP|touchscreen-compile|PASS'
+    }
+    foreach ($key in $touchscreenGroups.Keys) {
+        if (-not (@($captured[$key]) | Where-Object { "$_".StartsWith($touchscreenGroups[$key]) })) {
+            Write-Host "FAIL: $key did not print $($touchscreenGroups[$key])" -ForegroundColor Red
+            if (-not $failed.Contains($key)) { $failed.Add($key); $exitCodes[$key] = 1 }
+        }
+    }
+    Write-Host ''
+    Write-Host 'Touchscreen locator, real executables (read only):' -ForegroundColor Cyan
+    $realRows = @($hookLines | Where-Object { "$_" -like 'TOUCH-REAL|*' } | ForEach-Object { ,"$_".Split('|') })
+    foreach ($row in $realRows) {
+        $color = if ($row[2] -eq 'PASS') { 'Green' } elseif ($row[2] -eq 'BLOCKED') { 'Yellow' } else { 'Red' }
+        Write-Host ("  {0}: {1} ({2})" -f $row[1], $row[2], $row[3]) -ForegroundColor $color
+        if ($row[2] -eq 'FAIL' -and -not $failed.Contains('dcp-touch-absolute-tests')) { $failed.Add('dcp-touch-absolute-tests') }
+    }
+    if ($realRows.Count -eq 0) {
+        Write-Host '  FAIL: no per-build result was printed' -ForegroundColor Red
+        if (-not $failed.Contains('dcp-touch-absolute-tests')) { $failed.Add('dcp-touch-absolute-tests') }
+    }
+    Write-Host ''
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Touchscreen mode tests passed.' -ForegroundColor Green
     exit 0
 }
 if ($GamescopePacing) {

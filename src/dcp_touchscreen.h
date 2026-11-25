@@ -12,6 +12,20 @@ extern "C" {
 
 typedef struct DcpTouchscreen DcpTouchscreen;
 
+/* How a physical touchscreen moves the game's pointer (dcp.ini: touchscreen_mode). PS4 Touchpad is the default and what a
+ * missing, empty or unknown value means. */
+typedef enum {
+    DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD,         /* dragging moves the pointer, like the DualShock 4 touchpad */
+    DCP_TOUCHSCREEN_MODE_PS_VITA_DIRECT_TOUCH, /* the pointer is placed under the finger */
+    DCP_TOUCHSCREEN_MODE_COUNT
+} DcpTouchscreenMode;
+
+extern const char *const dcp_touchscreen_mode_key;
+/* The mode a saved value names; PS4 Touchpad for anything else. */
+int dcp_touchscreen_mode_from_value(const char *value);
+const char *dcp_touchscreen_mode_name(int mode);
+const char *dcp_touchscreen_mode_label(int mode);
+
 /* The presented game picture, as fractions of the window. */
 typedef struct {
     float x, y, width, height;

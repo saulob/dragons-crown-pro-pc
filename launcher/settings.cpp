@@ -16,6 +16,7 @@
 #include "dcp_keys.h"
 #include "dcp_launcher.h"
 #include "dcp_resolution.h"
+#include "dcp_touchscreen.h"
 #include "dcp_voice.h"
 #include "game_files.h"
 #include "game_process.h"
@@ -64,6 +65,7 @@ constexpr ManagedSetting kBaseSettings[] = {
     {kMouseSensitivityKey, "100"},
     {kMousePointerModeKey, "hold"},
     {kMouseSteamDeckTrackpadKey, "auto"},
+    {kTouchscreenModeKey, kTouchscreenModePs4Touchpad},
     {kStorySkipOfferKey, "0"},
     {kTutorialSkipOfferKey, "0"},
     {kUnlockGalleryKey, "0"},
@@ -444,6 +446,13 @@ extern "C" int dcp_skip_intro(const char* settings_file) {
     using namespace dcp;
     const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
     return settings.GetBool(kSkipIntroKey, false) ? 1 : 0;
+}
+
+extern "C" int dcp_touchscreen_direct_touch(const char* settings_file) {
+    using namespace dcp;
+    const LauncherSettings settings(PathFromUtf8(settings_file ? settings_file : ""));
+    const std::string mode = settings.Get(kTouchscreenModeKey, kTouchscreenModePs4Touchpad);
+    return dcp_touchscreen_mode_from_value(mode.c_str()) == DCP_TOUCHSCREEN_MODE_PS_VITA_DIRECT_TOUCH ? 1 : 0;
 }
 
 extern "C" int dcp_japanese_menu_buttons(const char* settings_file) {

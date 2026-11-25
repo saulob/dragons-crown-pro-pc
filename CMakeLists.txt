@@ -102,6 +102,7 @@ set(DCP_RUNTIME_SOURCES
     src/hp_override_hooks.c
     src/default_message_hook.c
     src/guest_hook.c
+    src/touch_absolute.c
     src/inn_layout.c
     src/title_layout.c
     src/runtime.c
@@ -361,6 +362,17 @@ target_include_directories(dcp-kraken-fix-tests PRIVATE src)
 target_compile_definitions(dcp-kraken-fix-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-kraken-fix-tests PRIVATE -Wall -Wextra)
 
+# Focused tests of the PS Vita Direct Touch pointer: the touchscreen mode setting, the option-read sites in every local boot
+# image, the mode while the screen is touched, the screen-to-surface mapping and every refusal (tools/test.ps1); not part of
+# the default build.
+add_executable(dcp-touch-absolute-tests EXCLUDE_FROM_ALL tests/touch_absolute_tests.cpp src/touch_absolute.c src/guest_hook.c
+    src/cheat_hooks.cpp src/runtime_cheats.cpp)
+set_target_properties(dcp-touch-absolute-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_include_directories(dcp-touch-absolute-tests PRIVATE src)
+target_compile_definitions(dcp-touch-absolute-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(dcp-touch-absolute-tests PRIVATE -Wall -Wextra)
+target_link_libraries(dcp-touch-absolute-tests PRIVATE dcp_keys)
+
 # Focused tests of the cheats: the list, the session layer, the menu model, the rules and the native hook layer
 # (tools/test.ps1); not part of the default build.
 set(DCP_IMGUI_TEST_SOURCES
@@ -427,7 +439,7 @@ endif()
 # default build.
 add_executable(dcp-build-parity-tests EXCLUDE_FROM_ALL tests/build_parity_tests.cpp src/cheat_hooks.cpp
     src/runtime_cheats.cpp src/guest_hook.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/skip_intro.c src/menu_buttons.c
-    src/gallery_unlock.c src/kraken_fix.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c src/system_type_hook.c src/ultrawide_hooks.c
+    src/gallery_unlock.c src/kraken_fix.c src/touch_absolute.c src/startup_save_hook.c src/exit_game_hook.c src/exit_game_text.c src/title_layout.c src/system_type_hook.c src/ultrawide_hooks.c
     src/voice_hooks.c src/boss_battle.c src/boss_battle_campaign.c src/boss_battle_hook.c src/boss_battle_record.cpp
     src/boss_battle_text.c src/hydeland_town.c src/inn_layout.c src/endgame_unlocks.c src/boss_battle_online.c
     src/network_access.c src/network_hint.c src/online_prompt.c src/early_story_online.c src/early_story_session.c

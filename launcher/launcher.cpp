@@ -37,6 +37,7 @@
 #include "dcp_displays.h"
 #include "dcp_graphics.h"
 #include "dcp_resolution.h"
+#include "dcp_touchscreen.h"
 #include "dcp_voice.h"
 #include "game_files.h"
 #include "game_install.h"
@@ -211,6 +212,10 @@ constexpr char kPointerInteractionHelp[] =
     "Pointer Control.";
 constexpr char kPointerSensitivityHelp[] = "Controls how fast mouse movement moves the game's pointer.";
 constexpr char kWheelHelp[] = "The button a wheel step presses. Off by default.";
+constexpr char kTouchscreenModeHelp[] =
+    "PS4 Touchpad moves the pointer by dragging your finger, like the touchpad of the PS4 version. PS Vita Direct Touch "
+    "places the pointer where you touch the screen and a quick tap clicks there. Only physical touchscreens are affected, "
+    "never a controller's touchpad. Applies at the next game start.";
 constexpr char kSkipIntroHelp[] = "Skip startup logos and the opening movie and go straight to the title screen";
 constexpr char kJapaneseMenuButtonsHelp[] =
     "Off: %s confirms and %s cancels in menus. On: %s confirms and %s cancels, as in the Japanese release. Combat "
@@ -1389,6 +1394,9 @@ private:
         if (ui.Section("Mouse", true)) {
             MouseControls(ui);
         }
+        if (ui.Section("Touchscreen", true)) {
+            TouchscreenControls(ui);
+        }
         if (ui.Section("Port hotkeys", true)) {
             for (int action = DCP_KEY_FIRST_HOTKEY; action < DCP_KEY_COUNT; ++action) {
                 KeyRow(ui, static_cast<DcpKeyAction>(action));
@@ -1410,6 +1418,15 @@ private:
             ui.Choice("Character Highlight", kCharacterHighlightChordHelp, dcp::highlight::kChordKey,
                       dcp::highlight::kChords[dcp::highlight::kDefaultChord].name, chords);
         }
+    }
+
+    void TouchscreenControls(trg::Ui& ui) {
+        std::vector<trg::Option> modes;
+        for (int mode = 0; mode < DCP_TOUCHSCREEN_MODE_COUNT; ++mode) {
+            modes.push_back({dcp_touchscreen_mode_name(mode), dcp_touchscreen_mode_label(mode)});
+        }
+        ui.Choice("Touchscreen Mode", kTouchscreenModeHelp, dcp_touchscreen_mode_key,
+                  dcp_touchscreen_mode_name(DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD), modes);
     }
 
     void MouseControls(trg::Ui& ui) {

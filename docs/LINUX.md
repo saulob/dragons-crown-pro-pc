@@ -95,6 +95,9 @@ discover, and rewrites it about once a second; a write is needed even when the g
 because the competing write lands on the other root. Each root's previous value is restored on focus loss and on exit,
 and a value Steam changed in the meantime is left alone. A physical touchscreen is then the DualShock 4 touch surface: a
 contact is a touchpad contact and a short tap is a touchpad click; it moves no host cursor and presses no mouse button.
+**Touchscreen Mode** on the launcher's Controls page (`touchscreen_mode`) chooses how that contact moves the game's pointer:
+`ps4_touchpad` (the default) drags it like the DualShock 4 touchpad, `ps_vita_direct_touch` places it under the finger (the
+log shows `Touchscreen mode: PS Vita Direct Touch`, or says why it stays a PS4 Touchpad).
 Mice, the Steam Deck trackpads and Steam Virtual Gamepads are unchanged. `DCP_TOUCH_GAMESCOPE=0` in the environment keeps
 Gamescope's own touch handling. The log shows `Touchscreen telemetry: event=touch_route_ready video=<wayland|x11>
 gamescope=<yes|no> direct_devices=<n>`, then `gamescope_touch_claim roots=<n> compositor=<yes|no>` (or

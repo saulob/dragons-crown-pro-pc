@@ -67,6 +67,10 @@ inline constexpr char kMouseSensitivityKey[] = "mouse_pointer_sensitivity";
 inline constexpr char kMousePointerModeKey[] = "mouse_pointer_mode";
 // Steam Deck Gaming Mode: Auto drives the game's pointer from the trackpad without holding Pointer Control (src/dcp_trackpad.h).
 inline constexpr char kMouseSteamDeckTrackpadKey[] = "mouse_steam_deck_trackpad";
+// How a physical touchscreen moves the game's pointer (src/dcp_touchscreen.h, src/touch_absolute.h). Applies at the next game start.
+inline constexpr char kTouchscreenModeKey[] = "touchscreen_mode";
+inline constexpr char kTouchscreenModePs4Touchpad[] = "ps4_touchpad";
+inline constexpr char kTouchscreenModePsVitaDirectTouch[] = "ps_vita_direct_touch";
 // The game's own story skip and tutorial questions for every new character (src/skip_offers.h).
 inline constexpr char kStorySkipOfferKey[] = "story_skip_offer";
 inline constexpr char kTutorialSkipOfferKey[] = "tutorial_skip_offer";

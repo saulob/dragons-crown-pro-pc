@@ -49,6 +49,7 @@
 #include "dcp_png.h"
 #include "dcp_settings.h"
 #include "dcp_title.h"
+#include "dcp_touchscreen.h"
 #include "dcp_voice.h"
 #include "default_message_hook.h"
 #include "exit_game_text.h"
@@ -2178,6 +2179,120 @@ void TestSkipIntroSettings(const fs::path& base) {
     const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
     CHECK(loader.find("skip_intro_install(image,size,entry,known_build ? build_key : NULL,skip_intro_requested,") != std::string::npos);
     CHECK(loader.find("skip_intro_wanted(dcp_skip_intro(settings_file))") != std::string::npos);
+}
+
+// Touchscreen Mode (DCP-T7M4KC): PS4 Touchpad by default, for a missing setting and for anything unknown; PS Vita Direct
+// Touch only when chosen; independent of Mouse Controls; kept by the key and mouse resets and cleared by the full reset.
+void TestTouchscreenModeSettings(const fs::path& base) {
+    const fs::path file = base / "touchscreen_mode" / "dcp.ini";
+    fs::remove_all(file.parent_path());
+    int managed = 0;
+    for (const ManagedSetting& setting : ManagedSettings()) {
+        managed += setting.key == kTouchscreenModeKey && setting.default_value == kTouchscreenModePs4Touchpad;
+    }
+    CHECK(managed == 1);
+    CHECK(std::string(kTouchscreenModeKey) == dcp_touchscreen_mode_key);
+    CHECK(std::string(kTouchscreenModePs4Touchpad) == dcp_touchscreen_mode_name(DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD));
+    CHECK(std::string(kTouchscreenModePsVitaDirectTouch) == dcp_touchscreen_mode_name(DCP_TOUCHSCREEN_MODE_PS_VITA_DIRECT_TOUCH));
+
+    CHECK(dcp_touchscreen_direct_touch(nullptr) == 0 && dcp_touchscreen_direct_touch("") == 0);
+    CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 0);
+    WriteAll(file, "mouse_controls = 1\nskip_intro = 1\n");
+    CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 0);
+    for (const char* saved : {"ps4_touchpad", "", "banana", "touchscreen", "ds4_trackpad", "PS_VITA_DIRECT_TOUCH", "1", "on"}) {
+        WriteAll(file, std::string("touchscreen_mode = ") + saved + "\n");
+        CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 0);
+    }
+    WriteAll(file, "touchscreen_mode = ps_vita_direct_touch\n");
+    CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 1);
+
+    // Mouse Controls never decides the touchscreen mode, in either direction.
+    for (const char* mouse : {"0", "1"}) {
+        WriteAll(file, std::string("mouse_controls = ") + mouse + "\ntouchscreen_mode = ps_vita_direct_touch\n");
+        CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 1);
+        WriteAll(file, std::string("mouse_controls = ") + mouse + "\n");
+        CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 0);
+    }
+
+    WriteAll(file, "touchscreen_mode = ps_vita_direct_touch\n");
+    {
+        LauncherSettings settings(file);
+        settings.SetBool(kMouseControlsKey, false);
+        CHECK(settings.Get(kTouchscreenModeKey) == kTouchscreenModePsVitaDirectTouch);
+        ResetMouse(settings);
+        CHECK(settings.Get(kTouchscreenModeKey) == kTouchscreenModePsVitaDirectTouch);
+        ResetKeys(settings);
+        CHECK(settings.Get(kTouchscreenModeKey) == kTouchscreenModePsVitaDirectTouch);
+        settings.Set(kTouchscreenModeKey, kTouchscreenModePs4Touchpad);
+        CHECK(settings.Save());
+        CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 0);
+        settings.Set(kTouchscreenModeKey, kTouchscreenModePsVitaDirectTouch);
+        CHECK(settings.Save());
+        CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 1);
+        settings.ResetToDefaults();
+        CHECK(settings.Get(kTouchscreenModeKey) == kTouchscreenModePs4Touchpad);
+        CHECK(settings.Save());
+        CHECK(dcp_touchscreen_direct_touch(file.string().c_str()) == 0);
+    }
+    const std::string loader = ReadAll(fs::path(DCP_SOURCE_DIR) / "src" / "loader.c");
+    CHECK(loader.find("dcp_touchscreen_direct_touch(settings_file)") != std::string::npos);
+}
+
+// The Controls page: a Touchscreen section after Mouse, never on the Gameplay page, not behind Mouse Controls or an
+// environment check, with one row that offers both modes and explains them.
+void TestTouchscreenControlsPage() {
+    const std::string launcher = ReadAll(fs::path(DCP_SOURCE_DIR) / "launcher" / "launcher.cpp");
+    const size_t gameplay = launcher.find("void PageGameplay(trg::Ui& ui) {");
+    const size_t controls = launcher.find("void PageControls(trg::Ui& ui) {");
+    const size_t touchscreen_controls = launcher.find("void TouchscreenControls(trg::Ui& ui) {");
+    const size_t mouse_controls = launcher.find("void MouseControls(trg::Ui& ui) {");
+    CHECK(gameplay != std::string::npos && controls != std::string::npos && gameplay < controls);
+    CHECK(touchscreen_controls != std::string::npos && mouse_controls != std::string::npos && touchscreen_controls < mouse_controls);
+    const std::string gameplay_page = launcher.substr(gameplay, controls - gameplay);
+    CHECK(gameplay_page.find("Touchscreen") == std::string::npos && gameplay_page.find("kTouchscreenMode") == std::string::npos);
+
+    const size_t keyboard = launcher.find("ui.Section(\"Keyboard controls\", true)", controls);
+    const size_t mouse = launcher.find("ui.Section(\"Mouse\", true)", controls);
+    const size_t touchscreen = launcher.find("ui.Section(\"Touchscreen\", true)", controls);
+    const size_t hotkeys = launcher.find("ui.Section(\"Port hotkeys\", true)", controls);
+    const size_t shortcuts = launcher.find("ui.Section(\"Controller shortcuts\", true)", controls);
+    CHECK(keyboard != std::string::npos && keyboard < mouse && mouse < touchscreen && touchscreen < hotkeys && hotkeys < shortcuts);
+    CHECK(launcher.find("TouchscreenControls(ui);", touchscreen) < hotkeys);
+    CHECK(launcher.find("ui.Section(\"Touchscreen\"", touchscreen + 1) == std::string::npos);
+
+    const std::string section = launcher.substr(touchscreen_controls, mouse_controls - touchscreen_controls);
+    CHECK(section.find("ui.Choice(\"Touchscreen Mode\", kTouchscreenModeHelp, dcp_touchscreen_mode_key,") != std::string::npos);
+    CHECK(section.find("dcp_touchscreen_mode_name(DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD), modes);") != std::string::npos);
+    CHECK(section.find("for (int mode = 0; mode < DCP_TOUCHSCREEN_MODE_COUNT; ++mode)") != std::string::npos);
+    CHECK(section.find("dcp_touchscreen_mode_label(mode)") != std::string::npos);
+    CHECK(section.find("SavedMouse") == std::string::npos && section.find("BeginDisabled") == std::string::npos &&
+          section.find("getenv") == std::string::npos && section.find("SteamDeck") == std::string::npos);
+    const size_t mouse_end = launcher.find("// What a mouse button presses", mouse_controls);
+    CHECK(mouse_end != std::string::npos && launcher.substr(mouse_controls, mouse_end - mouse_controls).find("Touchscreen") == std::string::npos);
+
+    CHECK(launcher.find("constexpr char kTouchscreenModeHelp[] =") != std::string::npos);
+    CHECK(launcher.find("PS4 Touchpad moves the pointer by dragging your finger, like the touchpad of the PS4 version. ") != std::string::npos);
+    CHECK(launcher.find("PS Vita Direct Touch \"\n    \"places the pointer where you touch the screen") != std::string::npos);
+    CHECK(std::string(dcp_touchscreen_mode_label(DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD)) == "PS4 Touchpad");
+    CHECK(std::string(dcp_touchscreen_mode_label(DCP_TOUCHSCREEN_MODE_PS_VITA_DIRECT_TOUCH)) == "PS Vita Direct Touch");
+}
+
+void TestTouchscreenPortuguese() {
+    using namespace localization;
+    const std::string help =
+        "PS4 Touchpad moves the pointer by dragging your finger, like the touchpad of the PS4 version. PS Vita Direct Touch "
+        "places the pointer where you touch the screen and a quick tap clicks there. Only physical touchscreens are affected, "
+        "never a controller's touchpad. Applies at the next game start.";
+    SetActiveLanguage(kPortugueseBrazilKey);
+    CHECK(std::string(Tr("Touchscreen")) == "Tela sensível ao toque");
+    CHECK(std::string(Tr("Touchscreen Mode")) == "Modo da tela sensível ao toque");
+    CHECK(std::string(Tr(dcp_touchscreen_mode_label(DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD))) == "Touchpad do PS4");
+    CHECK(std::string(Tr(dcp_touchscreen_mode_label(DCP_TOUCHSCREEN_MODE_PS_VITA_DIRECT_TOUCH))) == "Toque direto do PS Vita");
+    const std::string translated = Tr(help.c_str());
+    CHECK(translated != help && translated.find("Touchpad do PS4") != std::string::npos &&
+          translated.find("Toque direto do PS Vita") != std::string::npos);
+    SetActiveLanguage("english");
+    CHECK(std::string(Tr("Touchscreen Mode")) == "Touchscreen Mode" && std::string(Tr(help.c_str())) == help);
 }
 
 // The one gallery option: Off by default, in the Gameplay page after the skip offers, offered only where the Gallery
@@ -12064,6 +12179,24 @@ int main(int argc, char** argv) {
         std::printf("GROUP|launcher-renderer|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
+    // dcp-launcher-tests touchscreen: the DCP-T7M4KC Touchscreen Mode setting, Controls page and Portuguese text, with the
+    // existing settings, defaults and localization checks they rely on.
+    if (argc == 2 && std::string(argv[1]) == "touchscreen") {
+        const fs::path base = fs::temp_directory_path() / ("dcp_launcher_touchscreen_" + std::to_string(getpid()));
+        fs::remove_all(base);
+        fs::create_directories(base);
+        TestSettings(base);
+        TestDefaultsAgree();
+        TestTouchscreenModeSettings(base);
+        InGroup("touchscreen", TestTouchscreenControlsPage);
+        InGroup("touchscreen", TestTouchscreenPortuguese);
+        InGroup("touchscreen", TestLauncherLocalization);
+        std::error_code ec;
+        fs::remove_all(base, ec);
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-touchscreen|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "startup") {
         InGroup("startup", TestLauncherStartup);
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
@@ -12170,6 +12303,9 @@ int main(int argc, char** argv) {
     TestOnlineClient(base);
     TestSkipOfferSettings(base);
     TestSkipIntroSettings(base);
+    TestTouchscreenModeSettings(base);
+    TestTouchscreenControlsPage();
+    TestTouchscreenPortuguese();
     TestControllerRumbleSettings(base);
     TestControllerExitShortcutSettings(base);
     TestControllerCommsWheelShortcutSettings(base);

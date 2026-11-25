@@ -88,7 +88,7 @@ if ($sync.Count -ne 1 -or $ninja.Count -eq 0 -or $sync[0].Extent.StartOffset -gt
 
 $selectorTargets = @($commands | Where-Object { $_.GetCommandName() -eq 'ninja' } | ForEach-Object { $_.CommandElements } |
         Where-Object { $_ -is [Management.Automation.Language.VariableExpressionAst] -and $_.Splatted })
-$expectedSelectors = 'bossBattleOnlineSuites', 'earlyStorySessionSuites', 'launcherRendererSuites', 'editorTranslationSuites', 'editorReleaseSuites', 'gamescopePacingSuites'
+$expectedSelectors = 'bossBattleOnlineSuites', 'earlyStorySessionSuites', 'launcherRendererSuites', 'editorTranslationSuites', 'editorReleaseSuites', 'gamescopePacingSuites', 'touchscreenModeSuites'
 foreach ($name in $expectedSelectors) {
     if (@($selectorTargets | Where-Object { $_.VariablePath.UserPath -eq $name }).Count -eq 0) {
         Write-Host "FAIL: a focused selector no longer hands `$$name to ninja; update this test"

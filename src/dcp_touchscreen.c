@@ -11,6 +11,23 @@
 /* The game polls the pad once per frame, so the click is held for a few reads. */
 #define CLICK_READS 3
 
+const char *const dcp_touchscreen_mode_key="touchscreen_mode";
+
+static const struct { const char *name; const char *label; } touchscreen_modes[DCP_TOUCHSCREEN_MODE_COUNT]={
+    {"ps4_touchpad","PS4 Touchpad"}, {"ps_vita_direct_touch","PS Vita Direct Touch"},
+};
+
+int dcp_touchscreen_mode_from_value(const char *value) {
+    if (value) for (int i=0;i<DCP_TOUCHSCREEN_MODE_COUNT;++i) if (!strcmp(value,touchscreen_modes[i].name)) return i;
+    return DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD;
+}
+const char *dcp_touchscreen_mode_name(int mode) {
+    return touchscreen_modes[mode>=0 && mode<DCP_TOUCHSCREEN_MODE_COUNT ? mode : DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD].name;
+}
+const char *dcp_touchscreen_mode_label(int mode) {
+    return touchscreen_modes[mode>=0 && mode<DCP_TOUCHSCREEN_MODE_COUNT ? mode : DCP_TOUCHSCREEN_MODE_PS4_TOUCHPAD].label;
+}
+
 typedef enum { CONTACT_NONE, CONTACT_DOWN, CONTACT_LIFTED } Contact;
 
 struct DcpTouchscreen {

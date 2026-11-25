@@ -43,6 +43,7 @@
 #include "latin_glyphs.h"
 #include "gallery_unlock.h"
 #include "kraken_fix.h"
+#include "touch_absolute.h"
 #include "feature_sites.h"
 #include "game_files.h"
 #include "game_patches.h"
@@ -1488,7 +1489,7 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
                         system_type_hook_stub_bytes() + ultrawide_hooks_stub_bytes() + lzcnt_compat_stub_bytes() +
                         exit_game_hook_stub_bytes() + skip_intro_stub_bytes() + gallery_unlock_stub_bytes() +
                         boss_battle_stub_bytes() + endgame_unlocks_stub_bytes() + kraken_fix_stub_bytes() +
-                        appearance_hooks_stub_bytes();
+                        touch_absolute_stub_bytes() + appearance_hooks_stub_bytes();
     std::vector<uint8_t> memory(base + room + page, 0);
     std::memcpy(memory.data(), image.bytes.data(), size);
     uint8_t* area = memory.data() + base;
@@ -1509,6 +1510,7 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
     uint8_t* boss_battle_area = take(boss_battle_stub_bytes());
     uint8_t* endgame_area = take(endgame_unlocks_stub_bytes());
     uint8_t* kraken_area = take(kraken_fix_stub_bytes());
+    uint8_t* touch_area = take(touch_absolute_stub_bytes());
     uint8_t* appearance_area = take(appearance_hooks_stub_bytes());
     uint8_t* image_bytes = memory.data();
 
@@ -1658,6 +1660,10 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
         CHECK(kraken_fix_locate(image.bytes.data(), size, Key(build).c_str(), &kraken_site) == 1 && kraken_site != 0);
         CHECK(kraken_fix_install(image_bytes, size, entry, Key(build).c_str(), kraken_area, kraken_fix_stub_bytes()) == 1);
         CHECK(kraken_site != 0 && image_bytes[kraken_site] == 0xe9);
+        TouchAbsoluteSites touch_sites{};
+        CHECK(touch_absolute_locate(image.bytes.data(), size, &touch_sites) == 1 && touch_sites.sites[0] != 0);
+        CHECK(touch_absolute_install(image_bytes, size, entry, Key(build).c_str(), touch_area, touch_absolute_stub_bytes()) == 1);
+        CHECK(image_bytes[touch_sites.sites[0]] == 0xe9 && image_bytes[touch_sites.sites[1]] == 0xe9);
     }
     const bool offline_appearance = InstallAppearance(build, image_bytes, size, entry, appearance_area);
 
@@ -1695,6 +1701,10 @@ NativeInstall InstallEverything(const GameBuild& build, const BootImage& image, 
         CHECK(comms_bridge_active() == 1 && online[comms.text_call] == 0xe9 && online[party.tick] == 0xe9);
         comms_bridge_attach(nullptr, nullptr);
         party_hook_clear_unit_listeners();
+        TouchAbsoluteSites offline_touch{}, online_touch{};
+        CHECK(touch_absolute_locate(image.bytes.data(), size, &offline_touch) == 1);
+        CHECK(touch_absolute_locate(online.data(), size, &online_touch) == 1);
+        CHECK(online_touch.sites[0] == offline_touch.sites[0] && online_touch.sites[1] == offline_touch.sites[1]);
         result.quick_chat = party_found && g_failures == comms_before;
     }
 
@@ -2271,6 +2281,30 @@ int main(int argc, char** argv) {
         }
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
         std::printf("GROUP|parity-korean|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
+    // dcp-build-parity-tests touchscreen: every feature installed together on each local executable, the touch hooks last.
+    if (argc == 2 && std::string_view(argv[1]) == "touchscreen") {
+        int installed = 0;
+        for (const GameBuild& build : SupportedBuilds()) {
+            g_scope = build.label;
+            BootImage image;
+            if (!LoadBootImage(build, image)) {
+                std::printf("TOUCH-OVERLAP|%s|BLOCKED\n", build.label);
+                continue;
+            }
+            const int before = g_failures;
+            const DcpExecRange executable{0, image.bytes.size()};
+            const DcpImageView view{image.bytes.data(), image.bytes.size(), &executable, 1};
+            const DcpGameBuild game = LoaderView(build);
+            DcpFeatureSites located{};
+            dcp_resolve_features(&game, &view, 1, 1, &located);
+            InstallEverything(build, image, located);
+            ++installed;
+            std::printf("TOUCH-OVERLAP|%s|%s\n", build.label, g_failures == before ? "PASS" : "FAIL");
+        }
+        std::printf("%d checks, %d failed, %d local executables\n", g_checks, g_failures, installed);
+        std::printf("GROUP|parity-touchscreen|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
     TestContract();

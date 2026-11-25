@@ -300,6 +300,11 @@ This button is Pointer Control. Pick another Pointer Control button below to use
 Also performs the pointer interaction while Pointer Control is active.	Também executa a interação do ponteiro enquanto o Controle do ponteiro estiver ativo.
 This button is Pointer Interaction while Always On is selected. Pick another Pointer Interaction button below to use it for a control.	Este botão é a Interação do ponteiro enquanto Sempre ativo estiver selecionado. Escolha outro botão de Interação do ponteiro abaixo para usá-lo em um controle.
 Pointer Control Mode	Modo do controle do ponteiro
+Touchscreen	Tela sensível ao toque
+Touchscreen Mode	Modo da tela sensível ao toque
+PS4 Touchpad	Touchpad do PS4
+PS Vita Direct Touch	Toque direto do PS Vita
+PS4 Touchpad moves the pointer by dragging your finger, like the touchpad of the PS4 version. PS Vita Direct Touch places the pointer where you touch the screen and a quick tap clicks there. Only physical touchscreens are affected, never a controller's touchpad. Applies at the next game start.	Touchpad do PS4 move o ponteiro ao arrastar o dedo, como o touchpad da versão de PS4. Toque direto do PS Vita coloca o ponteiro onde você toca na tela e um toque rápido clica ali. Só afeta telas sensíveis ao toque físicas, nunca o touchpad de um controle. Vale a partir do próximo início do jogo.
 Hold moves the game's pointer while the Pointer Control button is held. Always On moves it whenever the mouse is free for gameplay, which suits a trackpad.	Segurar move o ponteiro do jogo enquanto o botão do Controle do ponteiro estiver pressionado. Sempre ativo o move sempre que o mouse estiver livre para o jogo, o que combina com um trackpad.
 Hold	Segurar
 Always On	Sempre ativo

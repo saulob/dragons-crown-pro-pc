@@ -16,6 +16,7 @@
 #include "dcp_pointer_motion.h"
 #include "dcp_trackpad.h"
 #include "dcp_touchscreen.h"
+#include "touch_absolute.h"
 #include "dcp_sdl_compat.h"
 #include "early_story_online.h"
 #include "exit_game_hook.h"
@@ -91,6 +92,8 @@ static uint16_t touch_axis(float v, int max) {
     return (uint16_t)(v<=0.0f ? 0 : v>=1.0f ? max : (int)(v*max+0.5f));
 }
 static int pointer_owns_touch; /* the last sample: Pointer Control drives the touch surface; under `lock` */
+enum { TOUCHSCREEN_PAD = 1 }; /* the touchscreen is player 1's: pad handle 1, slots[0] */
+static int touchscreen_owns_touch; /* the last sample of player 1; under `lock` */
 static void touch_click(PadData *d, int right) {
     d->buttons|=BTN_TOUCHPAD;
     if (pointer_owns_touch) return;
@@ -349,8 +352,10 @@ static int native_trackpads(void) {
 static void merge_touchscreen(PadData *d, const DcpTouchSample *screen) {
     d->buttons|=screen->buttons;
     if (screen->touch) {
+        uint16_t x=screen->x, y=screen->y;
+        touch_absolute_remap(TOUCHSCREEN_PAD,&x,&y);
         memset(d->touches,0,sizeof(d->touches));
-        d->touches[0]=(PadTouch){.x=screen->x,.y=screen->y,.id=screen->id};
+        d->touches[0]=(PadTouch){.x=x,.y=y,.id=screen->id};
         d->touch_count=1;
     }
 }
@@ -374,6 +379,7 @@ static void sample_host(int slot, PadData *d) {
     d->connected=slot_connected(slot);
     d->connected_count=slots[slot].connected_count ? slots[slot].connected_count : d->connected;
     pointer_owns_touch=0;
+    if (slot==0) touchscreen_owns_touch=0;
     if (dcpgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
     const bool *k=slot==0 && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
     DcpMouseSample mouse={0};
@@ -388,6 +394,7 @@ static void sample_host(int slot, PadData *d) {
         dcp_touchscreen_sample(dcp_touchscreen_global(),&screen);
         if (screen.new_contact) dcp_touch_telemetry_record(DCP_TOUCH_EVENT_TOUCHPAD_USED);
         pointer_owns_touch=mouse.pointer || screen.touch;
+        touchscreen_owns_touch=screen.touch;
         dcp_mouse_screen_surface(dcp_mouse_global(),screen.touch);
     }
     load_button_maps();
@@ -652,6 +659,7 @@ static void apply_comms_wheel(PadData *d) {
 static void sample(int slot, PadData *d) {
     PadSlot *s=&slots[slot];
     sample_host(slot,d);
+    if (slot==0) touch_absolute_set_contact(touchscreen_owns_touch ? TOUCHSCREEN_PAD : 0);
     /* After the menu or the text dialog closes, buttons still held (the Cross that accepted a
      * name) stay hidden until released: the game would take them as a new press. */
     if (dcpgpu_overlay_captures_input()) { s->hold_after_capture=1; return; }

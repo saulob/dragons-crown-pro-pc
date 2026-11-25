@@ -183,6 +183,10 @@ int dcp_true_ultrawide(const char *settings_file);
 /* 1 when the settings file skips the startup logos and the opening (skip_intro; 0 by default). */
 int dcp_skip_intro(const char *settings_file);
 
+/* 1 when the settings file asks for PS Vita Direct Touch (touchscreen_mode = ps_vita_direct_touch); 0 for PS4 Touchpad, the
+ * default, and for a missing, empty or unknown value. */
+int dcp_touchscreen_direct_touch(const char *settings_file);
+
 /* 1 when the settings file asks for Circle to confirm in the menus (japanese_menu_buttons; 0 by default). */
 int dcp_japanese_menu_buttons(const char *settings_file);
 
