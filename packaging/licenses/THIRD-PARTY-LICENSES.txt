@@ -249,7 +249,7 @@ License: CC0 (public domain dedication).
 Launcher page icons
 ========================================================================
 
-The sidebar icons and the two Editor button icons, compiled into dragons_crown_pro.exe from assets/launcher/icons of the
+The sidebar icons and the three Editor button icons, compiled into dragons_crown_pro.exe from assets/launcher/icons of the
 source. Each one is drawn in the sidebar's or the button's colours; assets/launcher/icons/SOURCES.md records the source and every change made.
 
 display.svg, attribution required:

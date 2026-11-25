@@ -5604,7 +5604,8 @@ void TestHomeCacheAndRefresh() {
     CHECK(ReadDownloadsCache(cache) && ReadDownloadsCache(cache)->downloads == 71993 &&
           ReadDownloadsCache(cache)->fetched_unix == 1700000000);
     CHECK(!fs::exists(base / "user" / "home_stats.cache.part"));
-    for (const char* garbage : {"", "downloads=12\n", "downloads=-5\nfetched=1\n", "downloads=abc\nfetched=1\n"}) {
+    for (const char* garbage : {"", "downloads=12\n", "downloads=-5\nfetched=1\n", "downloads=abc\nfetched=1\n",
+                                "downloads=12\nfetched=9999999999999999999\n"}) {
         WriteAll(base / "garbage.cache", garbage);
         CHECK(!ReadDownloadsCache(base / "garbage.cache"));
     }

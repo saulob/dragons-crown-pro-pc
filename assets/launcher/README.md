@@ -42,6 +42,6 @@ right edge, darkens it and draws it nowhere else (`launcher/home_art.h`).
 
 # Page icons
 
-`icons/` holds the sidebar's thirteen SVGs and the two Editor button SVGs (`appearance.svg`, `inventory.svg`), the source of truth, with no rendered copies. They are
+`icons/` holds the sidebar's thirteen SVGs and the three Editor button SVGs (`appearance.svg`, `inventory.svg`, `back.svg`), the source of truth, with no rendered copies. They are
 compiled into the launcher (`launcher/page_icons.cpp`), so they ship in no package as loose files. `icons/SOURCES.md`
 records where each one came from and its license.

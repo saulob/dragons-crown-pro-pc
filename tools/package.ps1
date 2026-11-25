@@ -78,7 +78,7 @@ $ForbiddenNames = @('game', 'user', 'logs', 'cache', 'build', 'prepared', 'extra
     'eboot.bin', 'param.sfo', 'dcp.ini', 'boot.bin', 'content.bin', 'image.json', 'imports.json', 'symbols')
 $ForbiddenPatterns = @('*.pkg', '*.pdb', '*.debug', '*.log', '*.dmp', '*.ini', '*.bin', '*.self', '*.sprx', '*.prx',
     '*.elf', '*.cpk', '*.sfo', '*.json', '*.spv', '*.pipeline_cache', '*.obj', '*.o', '*.a', '*.lib', '*.tmp', '*.bak',
-    '*.sav', '*.py', '*.ps1', '*.c', '*.cpp', '*.h')
+    '*.sav', '*.dat', '*.cache', '*.py', '*.ps1', '*.c', '*.cpp', '*.h')
 # File signatures of PS4 packages, SELF/ELF executables and CRI archives.
 $ForbiddenMagic = @{ '7F434E54' = 'PS4 package'; '4F153D1D' = 'PS4 SELF'; '7F454C46' = 'ELF executable'; '43504B20' = 'CPK archive' }
 

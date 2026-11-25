@@ -776,7 +776,7 @@ Xbox controllers work without setup; the keyboard is always on. SDL offers a dev
 `runtime_pad.c` (W A S D and the arrow keys for the sticks, Space, Left Shift, E, Q, 1, 3, R, F, Z, C, I K J L, Enter,
 Tab, Backspace) and that F10 opens the Cheats menu in the game (it also has the one-shot **Add 100 Skill Points**, **Add 1,000 Gold** and **Level Up (+1 Level)**, which are not settings). The dead zone is not a setting.
 
-The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu, Window mode, Comms Wheel and Exit Game keys (F9 by default). A third section, **Controller shortcuts**, lists the fixed L3 + R3 Options menu chord, **Controller Exit Shortcut** (On by default: hold L1 + R1 + Options on one controller for 2 seconds to close the game), **Controller Comms Wheel Shortcut** (`View / Back + D-pad Up` by default, or `L1 + D-pad Up`, `R1 + D-pad Up`, legacy `D-pad Up`, or `Off`), and **Character Highlight**. Click a row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. **Reset to defaults** puts these keys back and changes no other setting.
+The page has two sections. **Keyboard controls** are the PS4 inputs (the sticks' four directions each, the face buttons, L1/R1/L2/R2/L3/R3, the D-pad, Options and the two touchpad sides); **Port hotkeys** are the Cheats menu, Window mode, Comms Wheel, Exit Game and Character Highlight keys (Exit Game F9 and Character Highlight F7 by default). A third section, **Controller shortcuts**, lists the fixed L3 + R3 Options menu chord, **Controller Exit Shortcut** (On by default: hold L1 + R1 + Options on one controller for 2 seconds to close the game), **Controller Comms Wheel Shortcut** (`View / Back + D-pad Up` by default, or `L1 + D-pad Up`, `R1 + D-pad Up`, legacy `D-pad Up`, or `Off`), and **Character Highlight**. Click a keyboard row (or focus it and press Enter), then press the new key; Esc cancels and is never bound. The controller shortcuts are choices on their rows. **Reset to defaults** puts these keys back and changes no other setting.
 
 Exit Game shortcuts (`gpu/shim/window.cpp`, policy in `src/dcp_exit_shortcut.h`): the key closes on its press, never on a held key's repeats, and also works with the F1 and F10 menus and the game's dialogs open; typing a name never reaches it. The controller chord is judged for each controller alone, with a monotonic clock: all three buttons must stay down 2 seconds, releasing one restarts the count, and losing focus, unplugging the controller or turning the setting Off ends it; one hold gives one request. While the three are down the game sees none of them, and buttons still held afterwards stay hidden until released. Both routes call `dcpgpu_request_close()`, the function behind the title's Exit Game row, so the log shows `Exit Game: host exit scheduled` then `Exit Game: hard exit`. Neither depends on the game build, language, Online Play or Steam.
 
@@ -906,10 +906,13 @@ the page shows and does, without ImGui; `launcher/save_page.cpp` draws it with t
     characters, ZIP64, encryption and methods other than stored and deflate are refused; entry count, per-file and total
     sizes, and the archive size are limited, and each entry is checked against its declared size and CRC-32.
   - **RAR**: recognized by its signature and refused with "extract it first"; import the extracted folder instead.
-- The Saves page has no editing controls: characters are edited on the Editor page (`SaveEdit` stays the Editor's model).
+- The Saves page has no editing controls: characters and the DATA slot's Gold are edited on the Editor page (`SaveEdit` stays the Editor's model).
 - Mutations follow `ActionStateFor`: nothing for an invalid save; Restore and Import wait while the Editor has unapplied
   changes; nothing while Play is starting. The launcher closes when the game starts, so the page never runs beside the game
   it started.
+- Restore and Import replace only `SAVE0.DAT`. The Editor's own files, `user/character_appearance.dat` and
+  `user/character_overrides.dat`, are left in place; an override is applied only while its character's identity is still
+  found in the save.
 
 ## Trophies
 

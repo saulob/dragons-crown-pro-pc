@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -221,10 +222,14 @@ std::optional<DownloadsCache> ReadDownloadsCache(const std::filesystem::path& fi
         if (value.empty() || value.size() > 19 || value.find_first_not_of("0123456789") != std::string::npos) {
             continue;
         }
-        if (key == "downloads") {
-            downloads = std::stoull(value);
-        } else if (key == "fetched") {
-            fetched = std::stoll(value);
+        try {
+            if (key == "downloads") {
+                downloads = std::stoull(value);
+            } else if (key == "fetched") {
+                fetched = std::stoll(value);
+            }
+        } catch (const std::exception&) {
+            continue;
         }
     }
     if (!downloads || !fetched) {

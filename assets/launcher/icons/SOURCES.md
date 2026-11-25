@@ -3,7 +3,7 @@
 The canonical navigation icon set for the launchers. Filenames are semantic, so the folder can be copied to another
 project as it is.
 
-**Copy `SOURCES.md` with the icons.** `display.svg`, `save.svg` and `bug-report.svg` require attribution, `editor.svg` is MIT, and that attribution has to
+**Copy `SOURCES.md` with the icons.** `display.svg`, `save.svg`, `bug-report.svg` and `back.svg` require attribution, `editor.svg` is MIT, and that attribution has to
 go wherever the icon goes.
 
 ## Attribution required

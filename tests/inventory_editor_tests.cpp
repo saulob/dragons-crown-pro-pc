@@ -2491,7 +2491,8 @@ void TestModifierSlots(const fs::path& base) {
     CHECK(shown(reopened, hammer) == (std::vector<int>{46, 20, 20, 9, 29, 26, 14, 29}) && top(reopened) == top(pristine));
     CHECK(ItemBytes(reopened, twin) == ItemBytes(pristine, twin));
     for (const size_t i : ChangedOffsets(Bytes(pristine.bytes().begin(), pristine.bytes().end()), written)) {
-        CHECK(i >= At(hammer) && (i - At(hammer)) / kItemEffectStride == 2 && (i - At(hammer)) % kItemEffectStride >= 4 || i >= written.size() - 64);
+        CHECK((i >= At(hammer) && (i - At(hammer)) / kItemEffectStride == 2 && (i - At(hammer)) % kItemEffectStride >= 4) ||
+              i >= written.size() - 64);
     }
 
     // The source wires each row to its own slot through the one field path, with the range the formula gives.

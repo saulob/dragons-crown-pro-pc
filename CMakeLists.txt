@@ -222,13 +222,15 @@ target_link_libraries(dcp-online-hle-tests PRIVATE dcp_net)
 set_target_properties(dcp-online-hle-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-online-hle-tests PRIVATE -Wall -Wextra)
 
-# Focused tests of the Story and Tutorial Skip Offers, on synthetic images and the local boot images (tools/test.ps1);
+# Focused tests of the Item Attack Cap patch, on synthetic images and the local boot images (tools/test.ps1);
 # not part of the default build.
 add_executable(dcp-item-attack-cap-tests EXCLUDE_FROM_ALL tests/item_attack_cap_tests.c src/item_attack_cap.c)
 target_include_directories(dcp-item-attack-cap-tests PRIVATE src)
 target_compile_definitions(dcp-item-attack-cap-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-item-attack-cap-tests PRIVATE -Wall -Wextra -Werror)
 
+# Focused tests of the Story and Tutorial Skip Offers, on synthetic images and the local boot images (tools/test.ps1);
+# not part of the default build.
 add_executable(dcp-skip-offers-tests EXCLUDE_FROM_ALL tests/skip_offers_tests.c src/skip_offers.c)
 target_include_directories(dcp-skip-offers-tests PRIVATE src)
 target_compile_definitions(dcp-skip-offers-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

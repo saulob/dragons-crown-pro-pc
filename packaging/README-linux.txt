@@ -113,6 +113,8 @@ PLAYING
 - F9 closes the game; the Controls page can rebind it. Holding L1 + R1 + Options
   on one controller for 2 seconds closes it too, and the Controller Exit Shortcut
   setting turns that off. It works the same under Steam, SteamOS and Gamescope.
+- F7 toggles Character Highlight, a colored outline around the character you
+  control; the Controls page can also choose a controller chord for it.
 - Controllers are read through SDL's gamepad support: Xbox controllers and the
   Steam Deck's own controls. The Windows build run through Proton (Bazzite Gaming
   Mode) turns SDL's HIDAPI drivers off by itself; an SDL_JOYSTICK_HIDAPI value you
@@ -153,14 +155,23 @@ PLAYING
   (https://ex-s.ru/dc.html), with PS4 porting work by AlchemistLab; it is not
   an official translation. No fan package is needed. The launcher, the F1
   options and the F10 overlay stay in English.
+- Korean on the USA and European builds is the game's official Korean
+  translation, contributed by dyumadel (PR #87) and built into the port: game
+  text, menus, subtitles and character messages. The launcher, the F1 options
+  and the F10 overlay stay in English. On the Asia/Hong Kong builds Korean is
+  the game's own language.
+- Saves page: back up, restore, export and import the installed game's
+  SAVE0.DAT; PS4 and PS3 saves can be imported, and the save being replaced is
+  backed up first. Characters are edited on the Editor page.
 - F10 opens the Cheats menu (meant for offline and local play); the launcher has a
   Cheats page for the values saved for the next start. The cheats apply to
   every local human player; the Ally cheats apply to AI allies only.
 - Character Editor (exclusive to this PC port): the launcher's Editor page
   finds your saves; pick a DATA slot and a character to recolor or hide
-  individual parts of its appearance, or edit its name, level, skill points and
-  HP. Nothing is written until Apply Changes, which backs up the save first.
-  Players with a compatible version see your custom look online.
+  individual parts of its appearance, or edit its name, level, skill points,
+  HP, stats, Difficulty and the DATA slot's Gold, and its items. Nothing is
+  written until Apply Changes, which backs up the save first. Players with a
+  compatible version see your custom look online.
 - Comms Wheel (Quick Chat): in an online room, View / Back + D-pad Up (configurable
   in Controls > Controller shortcuts; keyboard: T) opens eight quick
   messages (Ready, Hello, Need help, Let's go, Group up, Follow me, Good job,
