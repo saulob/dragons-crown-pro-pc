@@ -5,11 +5,13 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
 
 #include "dcp_frame_pacing.h"
+#include "dcp_present.h"
 
 namespace {
 
@@ -190,6 +192,120 @@ void TestRepeatsFillTheTicks() {
     CHECK(twice.repeats >= 58 && twice.repeats <= 61); // one repeat per new frame, 8.33 ms after it
 }
 
+using std::chrono::microseconds;
+
+struct GamescopeRun {
+    int flips_taken = 0;
+    int refusals_in_a_row = 0; ///< worst
+    int pushes = 0;
+    std::chrono::nanoseconds shortest_gap = std::chrono::hours(1); ///< between two pushes, flips and redraws together
+};
+
+constexpr int kTicks = 400;
+constexpr int kFirstFlipTick = 10;
+
+// DCP-F8K2Q7: the vblank thread and the swap thread. A tick starts late by the sleep's overshoot, or at once when a spin on
+// a repeat slot used up its sleep; the swap thread wakes 30 us after a push. `phase` is the first repeat slot.
+GamescopeRun SimulateGamescope(unsigned cadence, std::chrono::nanoseconds phase, bool fixed) {
+    constexpr std::chrono::nanoseconds tick(16'666'666);
+    constexpr auto wake = microseconds(30), work = microseconds(300);
+    GamescopeRun run;
+    DcpPresent::SwapQueue<int> queue;
+    Pacing::FrameLimiter limiter{cadence, Clock::time_point{} + phase};
+    Clock::time_point now{}, queued_at{}, busy_until{}, last_push{};
+    std::chrono::nanoseconds total_wait{0};
+    bool busy = false;
+    int refused = 0;
+
+    const auto advance = [&] {
+        while (true) {
+            const auto wakes_at = std::max(queued_at + wake, busy_until);
+            if (busy && busy_until <= now) {
+                queue.Finished();
+                busy = false;
+            } else if (!busy && !queue.Empty() && wakes_at <= now) {
+                queue.Take();
+                busy_until = wakes_at + work;
+                busy = true;
+            } else {
+                return;
+            }
+        }
+    };
+    const auto note_push = [&] {
+        queued_at = now;
+        if (run.pushes++ > 2 * kFirstFlipTick) {
+            run.shortest_gap = std::min(run.shortest_gap, std::chrono::nanoseconds(now - last_push));
+        }
+        last_push = now;
+    };
+
+    for (int n = 0; n < kTicks; ++n) {
+        const auto begin = now;
+        if (total_wait.count() > 0) {
+            now += total_wait + microseconds(55 + n * 7 % 15);
+        }
+        const auto tick_start = now;
+        total_wait -= tick_start - begin;
+        now += microseconds(1);
+        advance();
+        const bool waits = fixed ? queue.FlipQueued() : !queue.Empty();
+        if (n >= kFirstFlipTick && waits) {
+            run.refusals_in_a_row = std::max(run.refusals_in_a_row, ++refused);
+        } else if (n >= kFirstFlipTick) {
+            refused = 0;
+            limiter.Release(tick_start);
+            queue.PushFlip(n);
+            note_push();
+            ++run.flips_taken;
+        }
+        now += microseconds(4);
+        while (true) {
+            const auto slot = limiter.NextSlot();
+            if (Pacing::SlotBelongsToNextTick(slot, tick_start + tick, limiter.Period(), fixed)) {
+                break;
+            }
+            now = std::max(now, slot);
+            limiter.Release(now);
+            advance();
+            if (queue.PushRedraw(n)) {
+                note_push();
+            }
+        }
+        now += microseconds(1);
+        total_wait += tick - (now - tick_start);
+    }
+    return run;
+}
+
+void TestRepeatsNeverHoldBackFlips() {
+    constexpr int kFlips = kTicks - kFirstFlipTick;
+    // The phase the limiter's re-anchor gives when the video port opens: before the fix no flip was ever taken.
+    const GamescopeRun before = SimulateGamescope(120, microseconds(60), false);
+    CHECK(before.flips_taken == 0 && before.refusals_in_a_row == kFlips);
+    for (const unsigned hz : {90u, 120u, 144u, 165u, 240u, 480u}) {
+        const auto period = Pacing::FrameLimiter{hz, {}}.Period();
+        for (int phase_us = -10000; phase_us <= 10000; phase_us += 20) {
+            const GamescopeRun run = SimulateGamescope(hz, microseconds(phase_us), true);
+            CHECK(run.flips_taken == kFlips && run.refusals_in_a_row == 0);
+            CHECK(run.shortest_gap >= period * 2 / 5);
+            CHECK(std::abs(run.pushes - static_cast<int>(hz) * kTicks / 60) <= 10);
+        }
+    }
+}
+
+void TestSlotNearestTheTick() {
+    const Clock::time_point deadline = Clock::time_point{} + std::chrono::milliseconds(100);
+    const std::chrono::nanoseconds period(8'333'332);
+    for (const bool gamescope : {false, true}) {
+        CHECK(Pacing::SlotBelongsToNextTick(deadline, deadline, period, gamescope));
+        CHECK(!Pacing::SlotBelongsToNextTick(deadline - period, deadline, period, gamescope));
+        // Outside Gamescope only the deadline itself decides.
+        CHECK(Pacing::SlotBelongsToNextTick(deadline - std::chrono::nanoseconds(1), deadline, period, gamescope) == gamescope);
+        CHECK(Pacing::SlotBelongsToNextTick(deadline - period / 2, deadline, period, gamescope) == gamescope);
+    }
+}
+
 void TestParseFrameRate() {
     for (const int mode : Pacing::kFrameRateModes) {
         CHECK(Pacing::ParseFrameRate(std::to_string(mode)) == mode);
@@ -222,6 +338,8 @@ void TestWiring() {
     CHECK(InOrder(driver, "main_port.vblank_cv.notify_all();", "limiter.Enabled() && main_port.is_open"));
     CHECK(InOrder(driver, "limiter.Enabled() && main_port.is_open", "RepeatLastFrame();"));
     CHECK(InOrder(driver, "RepeatLastFrame();", "timer.End();"));
+    CHECK(Contains(driver, "SlotBelongsToNextTick(slot, tick_deadline, limiter.Period(), gamescope)"));
+    CHECK(Contains(driver, "const bool gamescope = DcpPresent::GamescopeSession();"));
 
     const std::string settings = ReadSource("gpu/shim/dcp_settings.cpp");
     CHECK(Contains(settings, "key == \"frame_rate\""));
@@ -241,6 +359,8 @@ int main() {
     TestVsyncBoundsTheCadence();
     TestLimiterSlots();
     TestRepeatsFillTheTicks();
+    TestRepeatsNeverHoldBackFlips();
+    TestSlotNearestTheTick();
     TestParseFrameRate();
     TestModeName();
     TestGamePacingIsUntouched();

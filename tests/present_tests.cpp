@@ -207,6 +207,38 @@ void TestFlipPacingIsGamescopeOnly() {
                    "gamescope{DcpPresent::GamescopeSession()}"));
 }
 
+void TestSwapQueueBacklog() {
+    DcpPresent::SwapQueue<int> queue;
+    CHECK(queue.Empty() && !queue.FlipQueued());
+
+    // A queued redraw is work for the swap thread but no backlog for the flip gate.
+    CHECK(queue.PushRedraw(1));
+    CHECK(!queue.Empty() && !queue.FlipQueued());
+    CHECK(!queue.PushRedraw(2) && queue.Size() == 1);
+
+    queue.PushFlip(3);
+    CHECK(queue.FlipQueued() && queue.Size() == 2);
+    CHECK(queue.Take() == 1 && queue.FlipQueued());
+    queue.Finished();
+    CHECK(queue.Take() == 3 && !queue.FlipQueued() && queue.Empty());
+
+    // A running flip keeps redraws out; the next flip queues behind it and is the backlog.
+    CHECK(!queue.PushRedraw(4));
+    queue.PushFlip(5);
+    CHECK(queue.FlipQueued());
+    queue.Finished();
+    CHECK(!queue.PushRedraw(6));
+    CHECK(queue.Take() == 5);
+    queue.Finished();
+    CHECK(queue.PushRedraw(7) && !queue.FlipQueued());
+}
+
+void TestFlipGateCountsOnlyFlips() {
+    const std::string driver = ReadSource("gpu/shadps4/core/libraries/videoout/driver.cpp");
+    CHECK(InOrder(driver, "bool VideoOutDriver::FlipWaitsForPresenter() {", "if (!swap_queue.FlipQueued()) {"));
+    CHECK(InOrder(driver, "swap_queue.Finished();", "work = swap_queue.Take();"));
+}
+
 void TestSwapchainRecreation() {
     const std::string swapchain = ReadSource("gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp");
     CHECK(Contains(swapchain, "DcpPresent::ImageCount(surface_min_images, surface_max_images, gamescope)"));
@@ -964,6 +996,8 @@ int main() {
     TestSessionDescription();
     TestFlipPacingModel();
     TestFlipPacingIsGamescopeOnly();
+    TestSwapQueueBacklog();
+    TestFlipGateCountsOnlyFlips();
     TestSwapchainRecreation();
     TestPadSamplingUntouched();
     TestAcquireResults();

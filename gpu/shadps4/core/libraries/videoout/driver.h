@@ -4,12 +4,12 @@
 #pragma once
 
 #include <chrono>
-#include <deque>
 #include <functional>
 
 #include "common/debug.h"
 #include "common/polyfill_thread.h"
 #include "core/libraries/videoout/video_out.h"
+#include "dcp_present.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -120,13 +120,12 @@ private:
     /// acquire and present block while the GPU is the bottleneck, which delayed the guest's
     /// vblank events on the vblank thread.
     void SwapThread(std::stop_token token);
-    void RunPresenter(std::function<void()> work, bool if_idle = false);
+    void RunPresenter(std::function<void()> work, bool redraw = false);
     bool FlipWaitsForPresenter();
 
     std::mutex swap_mutex;
     std::condition_variable_any swap_cv;
-    std::deque<std::function<void()>> swap_queue;
-    bool swap_busy = false;
+    DcpPresent::SwapQueue<std::function<void()>> swap_queue;
     std::jthread swap_thread; ///< before present_thread: destroyed after it
 
     std::mutex mutex;

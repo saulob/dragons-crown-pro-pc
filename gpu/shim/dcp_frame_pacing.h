@@ -114,6 +114,13 @@ private:
     Clock::time_point next_;
 };
 
+// Whether a repeat slot is left to the next vblank tick. Under Gamescope that includes the slot nearest the tick: a repeat
+// there would reach the presenter together with the tick's new frame.
+constexpr bool SlotBelongsToNextTick(FrameLimiter::Clock::time_point slot, FrameLimiter::Clock::time_point tick_deadline,
+                                     std::chrono::nanoseconds period, bool gamescope) {
+    return slot + (gamescope ? period / 2 : std::chrono::nanoseconds(0)) >= tick_deadline;
+}
+
 inline std::string ModeName(int setting) {
     return setting == 0 ? "Unlimited" : std::to_string(setting);
 }

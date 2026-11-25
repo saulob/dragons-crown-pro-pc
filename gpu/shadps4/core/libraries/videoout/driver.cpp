@@ -114,14 +114,15 @@ VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
     DcpStartupWatch::StartWatch();
 }
 
-void VideoOutDriver::RunPresenter(std::function<void()> work, bool if_idle) {
+void VideoOutDriver::RunPresenter(std::function<void()> work, bool redraw) {
     {
         std::scoped_lock lock{swap_mutex};
-        if (if_idle && (swap_busy || !swap_queue.empty())) {
-            return; // a redraw of the last frame is pointless while frames are queued
+        if (!redraw) {
+            swap_queue.PushFlip(std::move(work));
+        } else if (!swap_queue.PushRedraw(std::move(work))) {
+            return;
         }
-        swap_queue.push_back(std::move(work));
-        DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.size());
+        DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.Size());
     }
     swap_cv.notify_one();
 }
@@ -134,7 +135,7 @@ bool VideoOutDriver::FlipWaitsForPresenter() {
     }
     {
         std::scoped_lock lock{swap_mutex};
-        if (swap_queue.empty()) {
+        if (!swap_queue.FlipQueued()) {
             return false;
         }
     }
@@ -157,14 +158,12 @@ void VideoOutDriver::SwapThread(std::stop_token token) {
         std::function<void()> work;
         {
             std::unique_lock lock{swap_mutex};
-            swap_busy = false;
-            if (!swap_cv.wait(lock, token, [this] { return !swap_queue.empty(); })) {
+            swap_queue.Finished();
+            if (!swap_cv.wait(lock, token, [this] { return !swap_queue.Empty(); })) {
                 return;
             }
-            work = std::move(swap_queue.front());
-            swap_queue.pop_front();
-            DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.size());
-            swap_busy = true;
+            work = swap_queue.Take();
+            DcpStartupWatch::SetGauge(DcpStartupWatch::SwapQueue, swap_queue.Size());
         }
         work();
     }
@@ -765,6 +764,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     Common::AccurateTimer timer{vblank_period};
     const int target_fps = DcpSettings::Get().frame_rate.load();
     const double display_hz = DcpSettings::Get().display_refresh_hz;
+    const bool gamescope = DcpPresent::GamescopeSession();
     bool vsync = DcpSettings::Get().vsync;
     DcpFramePacing::FrameLimiter limiter{DcpFramePacing::RepeatCadenceHz(target_fps, vsync, display_hz),
                                          std::chrono::steady_clock::now()};
@@ -860,7 +860,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // show the last frame again.
         while (limiter.Enabled() && main_port.is_open && !token.stop_requested()) {
             const auto slot = limiter.NextSlot();
-            if (slot >= tick_deadline) {
+            if (DcpFramePacing::SlotBelongsToNextTick(slot, tick_deadline, limiter.Period(), gamescope)) {
                 break;
             }
             if (std::chrono::steady_clock::now() < slot) {

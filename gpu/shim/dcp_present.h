@@ -9,8 +9,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace DcpPresent {
 
@@ -55,6 +57,60 @@ inline std::uint32_t ImageCount(std::uint32_t surface_min, std::uint32_t surface
     }
     return count;
 }
+
+/// Work for the swap thread; the caller locks. Only a queued flip is backlog: a redraw shows an old frame and must never
+/// hold back a new one.
+template <typename Work>
+class SwapQueue {
+public:
+    void PushFlip(Work work) {
+        entries.push_back({std::move(work), true});
+        ++queued_flips;
+    }
+
+    /// Refused while anything is queued or running.
+    bool PushRedraw(Work work) {
+        if (busy || !entries.empty()) {
+            return false;
+        }
+        entries.push_back({std::move(work), false});
+        return true;
+    }
+
+    Work Take() {
+        Entry entry = std::move(entries.front());
+        entries.pop_front();
+        queued_flips -= entry.flip ? 1 : 0;
+        busy = true;
+        return std::move(entry.work);
+    }
+
+    void Finished() {
+        busy = false;
+    }
+
+    bool Empty() const {
+        return entries.empty();
+    }
+
+    std::size_t Size() const {
+        return entries.size();
+    }
+
+    bool FlipQueued() const {
+        return queued_flips != 0;
+    }
+
+private:
+    struct Entry {
+        Work work;
+        bool flip;
+    };
+
+    std::deque<Entry> entries;
+    std::size_t queued_flips = 0;
+    bool busy = false;
+};
 
 /// A swapchain acquire or present result as the frame sees it. OutOfDate also covers a lost surface.
 enum class SwapResult { Success, Suboptimal, OutOfDate, Failure };

@@ -44,6 +44,10 @@
   checks, Apply / Discard, navigation, page structure and Portuguese text, on synthetic saves and read-only copies of local
   saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
   The normal run includes both.
+.PARAMETER GamescopePacing
+  Builds and runs only the DCP-F8K2Q7 Gamescope black screen and frame pacing regression (dcp-present-tests: swap queue backlog,
+  flip gate, swapchain and presenter lifecycle; dcp-frame-pacing-tests: repeat cadence, limiter, repeat and flip timing simulation,
+  SlotBelongsToNextTick) and reports their result alone. No game, no window, no GPU. The normal run includes both.
 .DESCRIPTION
   The default run is the current focus, K8R3M (issue #86, Kraken Damage Multiplier): the cheat tests with the Kraken damage group
   (dcp-cheats-tests), the Kraken null mast fix (dcp-kraken-fix-tests) and the hook locators (dcp-feature-sites-tests). Every other
@@ -95,7 +99,7 @@
   missing fails the run like one that fails.
 #>
 [CmdletBinding()]
-param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor)
+param([switch]$SkipLinux, [switch]$Full, [switch]$FullSequential, [switch]$BossBattleOnline, [switch]$EarlyStorySession, [switch]$LauncherRenderer, [switch]$HeadlessCli, [switch]$EditorTranslation, [switch]$EditorRelease, [switch]$SavePage, [switch]$InventoryEditor, [switch]$GamescopePacing)
 
 $script:Clock = [Diagnostics.Stopwatch]::StartNew()
 $script:StartClock = [datetime]::Now
@@ -485,7 +489,7 @@ $defaultFocusSuites = @('dcp-cheats-tests', 'dcp-kraken-fix-tests', 'dcp-feature
 $defaultFocusGroups = [ordered]@{
     'dcp-cheats-tests' = @('GROUP|issue86-kraken-damage|PASS')
 }
-$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
+$useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor -or $GamescopePacing)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
                           'dcp-boss-battle-menu-tests', 'dcp-early-story-tests', 'dcp-feature-sites-tests', 'dcp-build-parity-tests'
 $earlyStorySessionSuites = 'dcp-net-tests', 'dcp-early-story-tests'
@@ -495,6 +499,7 @@ $editorTranslationSuites = @('dcp-save-editor-tests')
 $editorReleaseSuites = @('dcp-save-editor-tests', 'dcp-runtime-overlay-tests', 'dcp-appearance-online-tests')
 $savePageSuites = @('dcp-save-page-tests', 'dcp-save-editor-tests')
 $inventoryEditorSuites = @('dcp-inventory-editor-tests', 'dcp-save-editor-tests')
+$gamescopePacingSuites = @('dcp-present-tests', 'dcp-frame-pacing-tests')
 if ($BossBattleOnline) {
     $tests = @($tests | Where-Object { $bossBattleOnlineSuites -contains $_.Exe })
     $requiredSuites = $bossBattleOnlineSuites
@@ -539,6 +544,9 @@ if ($BossBattleOnline) {
             -Key 'dcp-save-editor-tests quick' -Arguments @('quick'))
     )
     $requiredSuites = $inventoryEditorSuites
+} elseif ($GamescopePacing) {
+    $tests = @($tests | Where-Object { $gamescopePacingSuites -contains $_.Exe })
+    $requiredSuites = $gamescopePacingSuites
 } elseif ($EditorRelease) {
     $tests = @($tests | Where-Object { $editorReleaseSuites -contains $_.Exe })
     $tests += Test-Step 'Linux Character Editor release groups (WSL: tools/build.sh --editor, builds only the Editor test targets; skipped without WSL)' -Command { Get-LinuxBuildCommand '--editor' } `
@@ -558,7 +566,7 @@ if ($BossBattleOnline) {
 Write-Step 'Building the focused tests'
 # The launcher tests read compiled-in icons and sources: a leftover executable must never be the one that runs.
 Remove-Item -LiteralPath (Join-Path $buildDir 'bin\dcp-launcher-tests.exe') -Force -ErrorAction SilentlyContinue
-if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
+if ($BossBattleOnline) { & ninja -C $buildDir @bossBattleOnlineSuites } elseif ($EarlyStorySession) { & ninja -C $buildDir @earlyStorySessionSuites } elseif ($LauncherRenderer) { & ninja -C $buildDir @launcherRendererSuites } elseif ($HeadlessCli) { & ninja -C $buildDir @headlessCliSuites } elseif ($EditorTranslation) { & ninja -C $buildDir @editorTranslationSuites } elseif ($EditorRelease) { & ninja -C $buildDir @editorReleaseSuites } elseif ($SavePage) { & ninja -C $buildDir @savePageSuites } elseif ($InventoryEditor) { & ninja -C $buildDir @inventoryEditorSuites } elseif ($GamescopePacing) { & ninja -C $buildDir @gamescopePacingSuites } elseif ($useDefaultFocus) { & ninja -C $buildDir @defaultFocusSuites } else {
 & ninja -C $buildDir dcp-memory-windows-tests dcp-launcher-tests dcp-launcher-startup-tests dcp-korean-localization-tests dcp-save-editor-tests dcp-save-page-tests dcp-inventory-editor-tests dcp-character-override-tests dcp-test-progress-tests dcp-runtime-overlay-tests dcp-appearance-online-tests dcp-discord-tests dcp-build-diagnostics-tests dcp-build-parity-tests dcp-default-message-tests dcp-feature-sites-tests dcp-trophy-tests dcp-incident-tests dcp-incident-upload-tests dcp-crash-dump-tests dcp-cheats-tests dcp-kraken-fix-tests dcp-text-tests dcp-tiling-tests dcp-renderer-selection-tests dcp-opengl-backend-tests dcp-opengl-perf-tests dcp-cursor-tests dcp-mouse-tests dcp-touchscreen-steamos-tests dcp-steam-deck-trackpad-tests dcp-window-tests dcp-sdl-compat-tests dcp-present-tests dcp-frame-pacing-tests dcp-copy-pool-tests dcp-options-menu-tests dcp-comms-wheel-ui-tests dcp-amd-water-tests dcp-pipeline-cache-tests dcp-gpu-compat-tests dcp-issue84-tests dcp-water-diag-tests dcp-narrow-water-reader-tests dcp-savedata-tests dcp-voice-tests dcp-system-type-tests dcp-party-tests dcp-thread-lifecycle-tests dcp-comms-tests dcp-comms-session-tests dcp-comms-session-runtime-tests dcp-ultrawide-tests dcp-ultrawide-sides-tests dcp-isa-tests dcp-module-history-tests dcp-update-tests dcp-update-network-tests dcp-update-helper-tests dcp-log-tests dcp-net-tests dcp-online-hle-tests dcp-online-builds-tests dcp-skip-offers-tests dcp-item-attack-cap-tests dcp-skip-intro-tests dcp-character-highlight-tests dcp-gallery-unlock-tests dcp-endgame-unlocks-tests dcp-boss-battle-tests dcp-boss-battle-text-tests dcp-boss-battle-record-tests dcp-boss-battle-menu-tests dcp-boss-battle-online-tests dcp-boss-battle-visitor-lifecycle-tests dcp-boss-battle-handoff-tests dcp-boss-battle-early-story-handoff-tests dcp-early-story-tests dcp-menu-buttons-tests dcp-exit-game-tests dcp-title-layout-tests dcp-rtc-tests dcp-simulate-crash-tests
 }
 if ($LASTEXITCODE -ne 0) { Stop-Tool 'Test build failed' }
@@ -696,6 +704,15 @@ if ($InventoryEditor) {
         exit 1
     }
     Write-Host 'Inventory Editor tests passed.' -ForegroundColor Green
+    exit 0
+}
+if ($GamescopePacing) {
+    Write-Host ''
+    if ($failed.Count -gt 0) {
+        Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Gamescope pacing tests passed.' -ForegroundColor Green
     exit 0
 }
 if ($EditorTranslation -or $EditorRelease) {
