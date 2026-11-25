@@ -1945,7 +1945,6 @@ std::string FailureReport(const char* topic, const char* cause, const char* advi
     return std::string(topic) + ": " + cause + " " + advice;
 }
 
-// The launcher window could not open: the player is told through the system's own message box, and no game starts.
 DcpLauncherResult ReportLauncherFailure(const std::string& detail, bool software_tried) {
     std::fprintf(stderr, "Launcher: could not open its window (%s); the game was not started\n", detail.c_str());
     std::string text = detail + "\n\nThe game was not started.";

@@ -407,8 +407,7 @@ void HomePage::DrawHero(trg::Ui& ui, float width, float density, bool ready, con
     }
     const float half = (button_w - hero.gap) * 0.5f;
     ImGui::SetCursorScreenPos(ImVec2(actions_x, actions_top + hero.action_h + hero.gap));
-    // Secondary actions get a thin border in the label color so they stay visible over the hero artwork.
-    // The border color is constant across hover/active, so those states keep the same outline.
+    // A border keeps secondary buttons visible over the hero art.
     const auto secondary_button = [&](const char* label, float w) {
         ImVec4 border = theme.text;
         border.w *= 0.55f;

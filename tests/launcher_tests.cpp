@@ -3186,7 +3186,7 @@ void TestLauncherRenderer() {
     CHECK(shim.find("SDL_SOFTWARE_RENDERER") == std::string::npos && shim.find("direct3d11") == std::string::npos);
 }
 
-// G8K2W: the launcher opens whatever Vulkan offers. Source order and wiring; the logic itself is in
+// The launcher opens whatever Vulkan offers. Source order and wiring; the logic itself is in
 // tests/launcher_startup_tests.cpp.
 void TestLauncherStartup() {
     const fs::path source(DCP_SOURCE_DIR);
@@ -6009,7 +6009,7 @@ void TestHomeCacheAndRefresh() {
     fs::remove_all(base, ec);
 }
 
-// V6H2K: the first visible Home frame is complete from local state; the network only refreshes it.
+// The first visible Home frame is complete from local state; the network only refreshes it.
 struct GatedHomeNetwork {
     std::shared_ptr<std::atomic<bool>> open = std::make_shared<std::atomic<bool>>(false);
     std::shared_ptr<std::atomic<bool>> fail = std::make_shared<std::atomic<bool>>(false);
@@ -6209,7 +6209,7 @@ void TestHomeStartupCache() {
     fs::remove_all(base, ec);
 }
 
-// V6H2K: what the first visible launcher frame is made of, in source order. Not tied to line numbers.
+// What the first visible launcher frame is made of, in source order. Not tied to line numbers.
 void TestHomeStartupOrder() {
     const fs::path source(DCP_SOURCE_DIR);
     const std::string app = ReadAll(source / "launcher" / "launcher.cpp");

@@ -172,6 +172,9 @@ bool IsValidSetting(std::string_view key, std::string_view value) {
     if (key == kLauncherLanguageKey) {
         return one_of({kEnglishKey, kPortugueseBrazilKey});
     }
+    if (key == kTouchscreenModeKey) {
+        return one_of({kTouchscreenModePs4Touchpad, kTouchscreenModePsVitaDirectTouch});
+    }
     if (key == kFrameRateKey) {
         return one_of({"30", "60", "90", "120", "144", "165", "240", "0"});
     }

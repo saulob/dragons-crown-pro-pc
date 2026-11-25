@@ -243,7 +243,7 @@ target_include_directories(dcp-launcher-tests PRIVATE ${PROJECT_SOURCE_DIR}/gpu/
 set_target_properties(dcp-launcher-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-launcher-tests PRIVATE -Wall -Wextra)
 
-# G8K2W launcher startup without Vulkan: renderer fallback, the Vulkan probe and the graphics card list on scripted systems.
+# Launcher startup without Vulkan: renderer fallback, the Vulkan probe and the graphics card list on scripted systems.
 # Header-only logic: no SDL, no Vulkan, no window.
 add_executable(dcp-launcher-startup-tests EXCLUDE_FROM_ALL ../tests/launcher_startup_tests.cpp)
 target_include_directories(dcp-launcher-startup-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/gpu/shim)

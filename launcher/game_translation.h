@@ -92,8 +92,8 @@ struct TranslationRecipe {
 };
 
 // The records of `sheet` as the game shows them in the port's `translation` (pt-BR, or en on a slot not in English): the slot's
-// `native` records with every translated record the overlay would accept. The other records, other languages and an
-// unreadable translation leave `native` as it is.
+// `native` records with every translated record the overlay would accept, and the project's text for a record left in CJK
+// script. The other records, other languages and an unreadable translation leave `native` as it is.
 std::vector<std::string> TranslatedSheetRecords(std::string_view translation, const TranslationProfile& profile,
                                                 std::string_view sheet, std::vector<std::string> native);
 

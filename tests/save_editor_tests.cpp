@@ -8073,7 +8073,7 @@ void TestPortugueseColorNames(const fs::path& base, const fs::path& source) {
 
 // The Base Color names are read through the launcher language, never the game language: on the Asia/Hong Kong build
 // the Korean and Chinese slots hold text the launcher's font cannot draw.
-void TestLauncherLanguageColorNames(const fs::path& base, const fs::path& source) {
+void TestLauncherLanguageColorNames(const fs::path& source) {
     const fs::path app0 = source / "game" / "prepared" / "CUSA10209-1.00";
     const GameBuild* asia = nullptr;
     for (const GameBuild& build : SupportedBuilds()) {
@@ -8303,7 +8303,7 @@ std::vector<EditorGroup> EditorGroups(const fs::path& base, const fs::path& sour
              TestNativeColor();
              TestBc7Encode();
          }),
-        SingleUnit("editor-localization", 1, [=] { TestPortugueseColorNames(base, source); TestLauncherLanguageColorNames(base, source); TestMalformedColorNames(base); }),
+        SingleUnit("editor-localization", 1, [=] { TestPortugueseColorNames(base, source); TestLauncherLanguageColorNames(source); TestMalformedColorNames(base); }),
         SingleUnit("editor-ui-model", 1,
          [] {
              TestAppearanceUx();

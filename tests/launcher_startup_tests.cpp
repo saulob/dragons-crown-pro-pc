@@ -1,4 +1,4 @@
-// G8K2W: the launcher starts without Vulkan. Pure logic on scripted systems: no window, no SDL, no Vulkan and no game.
+// The launcher starts without Vulkan. Pure logic on scripted systems: no window, no SDL, no Vulkan and no game.
 // The same file is compiled by tools/test-linux-launcher.sh, so the Linux renderer order is checked here too.
 
 #include <cstdio>
@@ -407,7 +407,7 @@ void TestGraphicsCards() {
     fs::remove_all(folder);
 }
 
-// V6H2K: the probe freezes the UI thread, so it waits for a few complete frames after the window is shown.
+// The probe freezes the UI thread, so it waits for a few complete frames after the window is shown.
 void TestProbeWaitsForShownFrames() {
     CHECK(!GraphicsProbeDue(0, 0.0) && !GraphicsProbeDue(1, 0.02));
     CHECK(!GraphicsProbeDue(kProbeAfterFrames - 1, kProbeAfterSeconds + 1.0));

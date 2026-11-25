@@ -59,7 +59,6 @@ const char* SortLabel(InventorySort sort) {
 
 std::string SortPreview(InventorySort sort) { return std::string(Tr("Sort")) + ": " + Tr(SortLabel(sort)); }
 
-// The sort box keeps its usual width, and grows when the longest "Sort: <mode>" text of the active language needs more.
 float SortComboWidth(float scale) {
     float widest = 0.0f;
     for (const InventorySort sort : {InventorySort::kName, InventorySort::kCategory, InventorySort::kLevel, InventorySort::kRank}) {

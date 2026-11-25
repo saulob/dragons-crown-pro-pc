@@ -818,6 +818,17 @@ const GameBuild* BuildWithSource(std::string_view source) {
 
 std::string ProjectText(const ProjectSheet& sheet, size_t index) { return project_sheets::Text(sheet, index); }
 
+bool HasCjkText(const std::string& text) {
+    for (size_t i = 0; i + 2 < text.size(); ++i) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if ((lead & 0xF0) != 0xE0) continue;
+        const uint32_t code = uint32_t(lead & 0x0F) << 12 | uint32_t(static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6 |
+                              uint32_t(static_cast<unsigned char>(text[i + 2]) & 0x3F);
+        if ((code >= 0x3000 && code <= 0x9FFF) || (code >= 0xAC00 && code <= 0xD7AF) || (code >= 0xF900 && code <= 0xFAFF)) return true;
+    }
+    return false;
+}
+
 // The name the game composes from the project's own Portuguese records: the word or prefix, then the item list's name.
 std::string ComposedFromProject(const ItemRecord& record, const ProjectSheet& items, const ProjectSheet& effects, const ProjectSheet& system) {
     if (record.definition == kModifierNamedDefinition) {
@@ -973,6 +984,21 @@ void TestPortugueseFallbacks(const fs::path& source) {
     CHECK(other[283] == items.english[283] && other[349] == items.english[349]);
     CHECK(TranslatedSheetRecords(std::string(kPortEnglish), *usa->translation, "ItemList", items.english) == items.english);
 
+    // A record the overlay leaves in the slot's CJK script shows the project's readable text for that index, never CJK.
+    const ProjectSheet effects = LoadProjectSheet(source, "CustomItem");
+    constexpr size_t kSlideFire = 3996, kIntBonus = 105, kEnglishIsJapanese = 2241, kReadable = 10;
+    CHECK(effects.english.size() > kSlideFire && HasCjkText(effects.english[kEnglishIsJapanese]) && !HasCjkText(effects.english[kSlideFire]));
+    CHECK(!effects.portuguese.count(kIntBonus) && !HasCjkText(effects.english[kIntBonus]));
+    std::vector<std::string> slot = effects.english;
+    slot[kSlideFire] = slot[kIntBonus] = slot[kEnglishIsJapanese] = "\xE6\xBB\x91\xE6\x94\xBB\xE6\x92\x83";
+    for (const std::string& shown : {std::string(kPortEnglish), pt}) {
+        const std::vector<std::string> records = TranslatedSheetRecords(shown, *japan->translation, "CustomItem", slot);
+        CHECK(records[kSlideFire] == (shown == pt ? ProjectText(effects, kSlideFire) : effects.english[kSlideFire]));
+        CHECK(records[kIntBonus] == effects.english[kIntBonus]);
+        CHECK(records[kEnglishIsJapanese] == slot[kEnglishIsJapanese] && records[kReadable] == slot[kReadable]);
+    }
+    CHECK(TranslatedSheetRecords("ko", *japan->translation, "CustomItem", slot) == slot);
+
     // Names never come out blank: a catalog without the translated sheets falls back to the base name or a stand-in.
     const SaveModel model = SaveModel::FromBytes(MakeInventorySave());
     const ItemRecord hammer = ReadItem(model.bytes(), {0, -1, 0, 0});
@@ -1043,6 +1069,25 @@ void TestLauncherLanguageCatalogs(const fs::path& source) {
         if (index >= kFirstWeapon && index < kEndGear) CHECK(portuguese.ItemName(uint32_t(index)) == TrimText(text));
     }
     for (uint32_t id = kFirstWeapon; id < kEndGear; ++id) CHECK(CleanText(portuguese.ItemName(id)) && !portuguese.ItemName(id).empty());
+
+    // No modifier text or Items name is left in the slot's Chinese where the project has readable text for it.
+    constexpr uint16_t kItemsNameOffset = 1865;
+    size_t modifiers = 0;
+    for (const ItemCatalog* catalog : {&english, &portuguese}) {
+        const bool pt = catalog == &portuguese;
+        const auto project_cjk = [&](size_t index) {
+            return HasCjkText(effects.english[index]) && (!pt || HasCjkText(ProjectText(effects, index)));
+        };
+        for (uint16_t id = 0; id < 1024; ++id) {
+            const std::optional<size_t> index = ModifierTextIndex(id);
+            const EffectText effect = catalog->Effect(id);
+            if (!index || !effect.known) continue;
+            CHECK(!HasCjkText(effect.text) || project_cjk(*index));
+            ++modifiers;
+        }
+        for (uint16_t id = 373; id <= 531; ++id) CHECK(!HasCjkText(catalog->ItemsEntryName(id)) || project_cjk(id + kItemsNameOffset));
+    }
+    CHECK(modifiers > 1000);
 
     // Every record either catalog is made from is valid UTF-8 and carries no replacement character.
     for (const char* sheet : {"ItemList", "CustomItem", "SystemMsg"}) {

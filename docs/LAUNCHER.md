@@ -598,7 +598,9 @@ nothing). The frame rate is on the Gameplay page. There is no Performance page. 
   The Editor shows the game's own words in the launcher language: equipment names, name words, modifier texts and the
   appearance colours are the records of `ItemList`, `CustomItem` and `SystemMsg`, in English or translated into
   Portuguese (Brazil), laid over the slot's sheets by the same hash checks the game's overlay uses
-  (`TranslatedSheetRecords`, `launcher/game_translation.h`), so a name reads as it does in the game. Searching an item also
+  (`TranslatedSheetRecords`, `launcher/game_translation.h`), so a name reads as it does in the game. The launcher font has no
+  Chinese, Japanese or Korean, so a record those checks leave in the slot's own script shows the project's Portuguese or
+  English text for it instead; only records whose English text is itself untranslated stay as they are. Searching an item also
   matches its English name, and sorting and searching ignore accents. Only presentation changes: item definitions,
   modifier ids, colour indices and the save bytes are the same in every language.
 

@@ -461,6 +461,50 @@ const TranslationFile* SourceIn(std::span<const TranslationFile> files, std::str
     return nullptr;
 }
 
+bool HasCjk(std::string_view text) {
+    for (size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        const size_t length = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+        if (length == 3 && i + 2 < text.size()) {
+            const uint32_t code = uint32_t(lead & 0x0F) << 12 | uint32_t(static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6 |
+                                  uint32_t(static_cast<unsigned char>(text[i + 2]) & 0x3F);
+            if ((code >= 0x3000 && code <= 0x9FFF) || (code >= 0xAC00 && code <= 0xD7AF) || (code >= 0xF900 && code <= 0xFAFF)) {
+                return true;
+            }
+        }
+        i += length;
+    }
+    return false;
+}
+
+bool ReadableInLauncher(const net::Json& text) {
+    if (!text.is_string()) return false;
+    const std::string& value = text.as_string();
+    return !value.empty() && IsValidUtf8(value) && !HasCjk(value) &&
+           std::none_of(value.begin(), value.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 && c != '\n'; });
+}
+
+std::optional<net::Json> SheetEntries(std::span<const TranslationFile> files, std::string_view sheet) {
+    const std::string file_name = std::string(sheet) + ".json";
+    const auto file = std::find_if(files.begin(), files.end(),
+                                   [&](const TranslationFile& candidate) { return std::string_view(candidate.name) == file_name; });
+    if (file == files.end()) return std::nullopt;
+    std::optional<net::Json> json = net::Json::parse(std::string_view(reinterpret_cast<const char*>(file->data), file->size), 8);
+    if (!json || !json->is_object() || !(*json)["entries"].is_array()) return std::nullopt;
+    return json;
+}
+
+// The launcher font has no CJK: a record still in the slot's own script shows the project's text for that index.
+void ReplaceCjkRecords(const net::Json& sheet, std::string_view key, std::vector<std::string>& records, std::vector<bool>& done) {
+    for (const net::Json& item : sheet["entries"].items()) {
+        for (const size_t index : Indices(item["index"])) {
+            if (index >= records.size() || done[index] || !HasCjk(records[index]) || !ReadableInLauncher(item[key])) continue;
+            records[index] = item[key].as_string();
+            done[index] = true;
+        }
+    }
+}
+
 } // namespace
 
 const TranslationFile* PtBrSource(std::string_view source) { return SourceIn({kPtBrSources, kPtBrSourcesCount}, source); }
@@ -472,14 +516,8 @@ std::vector<std::string> TranslatedSheetRecords(std::string_view translation, co
     const bool portuguese = translation == kPortPortugueseBrazil;
     const bool english = translation == kPortEnglish && !profile.source.empty();
     if (!portuguese && !english) return native;
-    const std::span<const TranslationFile> files = portuguese ? PtBrTranslationFiles() : EnglishTranslationFiles();
-    const std::string file_name = std::string(sheet) + ".json";
-    const auto file = std::find_if(files.begin(), files.end(),
-                                   [&](const TranslationFile& candidate) { return std::string_view(candidate.name) == file_name; });
-    if (file == files.end()) return native;
-    const std::optional<net::Json> json =
-        net::Json::parse(std::string_view(reinterpret_cast<const char*>(file->data), file->size), 8);
-    if (!json || !json->is_object() || !(*json)["entries"].is_array()) return native;
+    const std::optional<net::Json> json = SheetEntries(portuguese ? PtBrTranslationFiles() : EnglishTranslationFiles(), sheet);
+    if (!json) return native;
 
     std::optional<SourceMap> source;
     std::optional<DroppedButtons> dropped;
@@ -523,6 +561,12 @@ std::vector<std::string> TranslatedSheetRecords(std::string_view translation, co
             }
             done[index] = true;
             records[index] = wording;
+        }
+    }
+    ReplaceCjkRecords(*json, text_key, records, done);
+    if (portuguese) {
+        if (const std::optional<net::Json> english_sheet = SheetEntries(EnglishTranslationFiles(), sheet)) {
+            ReplaceCjkRecords(*english_sheet, "en", records, done);
         }
     }
     return records;

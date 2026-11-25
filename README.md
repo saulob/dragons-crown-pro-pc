@@ -180,7 +180,7 @@ The Linux package is the same game and launcher, so the package requirements are
 
 ## Installing
 
-1. Download **DragonsCrownProPC-v1.5.0-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
+1. Download **DragonsCrownProPC-v1.5.1-windows-x64.zip** from the [latest release](https://github.com/saulob/dragons-crown-pro-pc/releases/latest) and extract it anywhere you can write to.
 2. Run **dragons_crown_pro.exe**. The launcher opens.
 3. On the **Play** page click **Install game...** and choose **From PKG...** to select your own Dragon's Crown Pro `.pkg` file, or **From extracted folder...** to select a game folder you already extracted (the one with `eboot.bin`, `sce_module` and `sce_sys`).
 4. Wait until **Ready to play** appears. The game is prepared on your PC in the `game` folder next to the program (about 6 GB). The `.pkg` file or the extracted folder is only read, and you can delete it afterwards.
