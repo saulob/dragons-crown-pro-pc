@@ -139,7 +139,8 @@ struct State {
     std::unique_ptr<net::LobbyLink> link;
     bool up = false, lost = false, down = false;
     uint32_t your_ip = 0, public_ip = 0;
-    bool lobby_on_lan = false;
+    std::string observed_ip;
+    bool lobby_on_lan = false, lobby_takes_endpoint = false;
     uint32_t next_request = 1;
     std::map<uint32_t, Pending> pending;
     std::vector<std::function<void()>> calls;
@@ -163,8 +164,7 @@ struct State {
     int boss_attr = BOSS_BATTLE_ROOM_NONE;
     uint32_t boss_published = 0;
     uint64_t bound_ms = 0;
-    uint16_t reported_port = 0;
-    uint32_t reported_ip = 0;
+    net::EndpointReport reported;
     bool udp_inflight = false, udp_acked = false;
     std::string last_external;
     // presence and friends
@@ -375,7 +375,11 @@ std::vector<net::Endpoint> Candidates(const Signal& s) {
 }
 
 net::Endpoint GameEndpoint(uint16_t member, const Signal& s) {
-    return s.account ? net::signaling_endpoint(s.address, member) : s.address;
+    if (!s.account) return s.address;
+    const bool shared = std::any_of(g.signals.begin(), g.signals.end(), [&](const auto& other) {
+        return other.first != member && other.second.account && other.second.address == s.address;
+    });
+    return net::signaling_endpoint(s.address, member, shared);
 }
 
 // The relay's two ends must not take g_mutex. While the lobby link reconnects, the seat is not ours again until
@@ -409,6 +413,14 @@ void ApplyPeers() {
     for (const auto& [member, s] : g.signals)
         if (member != g.me && s.account) g.socket->set_peer(s.account, Candidates(s), member);
     ConfigureRelay();
+}
+
+// Peers introduced before our socket was bound are already calling: our NAT has to let them in before our own report.
+void PunchPeers() {
+    if (!g.socket || !g.room) return;
+    for (const auto& [member, s] : g.signals)
+        if (member != g.me && s.account)
+            for (const net::Endpoint& e : Candidates(s)) g.socket->punch(e);
 }
 
 void ClearRoom() {
@@ -779,7 +791,11 @@ void OnResponse(const net::LobbyMessage& m) {
         std::printf("Matching2: endpoint %s (lobby has %s:%lld)\n", error ? "refused" : "reported",
                     net::lobby_endpoint_text(m.body["public_ip"].as_string(), m.body["ip"].as_string()).c_str(),
                     (long long)m.body["port"].as_int());
-        if (error) g.reported_port = 0;
+        if (!error && g.reported.endpoint.valid() && m.body["public_ip"].as_string().empty()) {
+            std::printf("Matching2: the lobby did not take the endpoint; peers get the observed address or the relay\n");
+            g.public_ip = g.your_ip;
+        }
+        if (error) g.reported = {};
         return;
     case Kind::kPresence:
         if (error) std::printf("Matching2: presence not published (%s)\n", m.code.c_str());
@@ -836,7 +852,7 @@ void OnResponse(const net::LobbyMessage& m) {
         }
         PauseRelay(false);
         g.lost = false;
-        g.reported_port = 0;
+        g.reported = {};
         g.udp_acked = false;
         g.presence_sent = "-";
         g.link->release_held();
@@ -1038,12 +1054,14 @@ void NoteRelayCapability(const Json& hello_reply) {
     g.story_capable = net::story_session_capability(hello_reply);
     g.boss_capable = net::boss_battle_session_capability(hello_reply);
     boss_battle_online_set_capable(g.boss_capable);
+    g.lobby_takes_endpoint = net::udp_endpoint_capability(hello_reply);
     appearance_session::Shared().SetCapable(appearance_session_enabled() && net::appearance_capability(hello_reply));
     std::printf("Matching2: lobby relay %s\n", g.relay_capable ? "available as a fallback" : "not offered");
     ConfigureRelay();
 }
 
 void NoteLobbyAddress(const std::string& ip) {
+    g.observed_ip = ip;
     g.your_ip = g.public_ip = net::parse_ip(ip);
     g.lobby_on_lan = net::is_lan(net::classify_text(ip));
 }
@@ -1075,7 +1093,7 @@ void OnLink(const net::LobbyMessage& m) {
         } else {
             PauseRelay(false);
             g.lost = false;
-            g.reported_port = 0;
+            g.reported = {};
             g.presence_sent = "-";
             g.link->release_held();
         }
@@ -1138,24 +1156,35 @@ void ReportEndpoint(uint64_t now) {
         g.socket = socket;
         SetRelayEnds(g.link.get(), socket);
         g.bound_ms = now;
-        g.reported_port = 0;
+        g.reported = {};
         g.udp_acked = false;
         g.udp_inflight = false;
         ApplyPeers();
+        PunchPeers();
     }
     if (!socket || !g.up || g.lost || g.udp_inflight) return;
-    net::Endpoint mapped;
-    const net::StunState stun = socket->stun(&mapped);
     const UpnpView upnp = upnp_view();
-    const bool pending = stun == net::StunState::kRunning || upnp.working;
-    if (!g.lobby_on_lan && pending && now - g.bound_ms < kEndpointWaitMs) return;
-    const net::EndpointChoice choice = net::choose_endpoint(g.your_ip, g.lobby_on_lan, socket->port(), stun, mapped,
-                                                            upnp.mapped ? upnp.external : net::Endpoint{});
-    g.public_ip = choice.ip;
-    if (choice.port == g.reported_port && choice.ip == g.reported_ip) return;
+    net::EndpointFacts facts;
+    facts.lobby_ip = g.your_ip;
+    facts.lobby_on_lan = g.lobby_on_lan;
+    facts.lobby_takes_endpoint = g.lobby_takes_endpoint;
+    facts.local_port = socket->port();
+    facts.stun = socket->stun();
+    if (upnp.mapped) facts.upnp = upnp.external;
+    if (!net::endpoint_settled(facts, upnp.working) && now - g.bound_ms < kEndpointWaitMs) return;
+    const net::EndpointChoice choice = net::choose_endpoint(facts);
+    const net::EndpointReport report = net::endpoint_report(choice, facts);
+    if (report == g.reported) return;
+    g.public_ip = choice.at.ip;
     Json body = Json::Object();
-    body.set("port", int64_t(choice.port));
-    if (choice.ip != g.your_ip) body.set("public_ip", net::ip_text(choice.ip));
+    body.set("port", int64_t(report.port));
+    if (report.public_ip) body.set("public_ip", net::ip_text(report.public_ip));
+    if (report.endpoint.valid()) {
+        Json endpoint = Json::Object();
+        endpoint.set("ip", net::ip_text(report.endpoint.ip));
+        endpoint.set("port", int64_t(report.endpoint.port));
+        body.set("endpoint", std::move(endpoint));
+    }
     Json lan = Json::Array();
     std::vector<uint32_t> addresses = net::local_ipv4_addresses();
     addresses.insert(addresses.begin(), net::parse_ip("127.0.0.1"));
@@ -1167,9 +1196,9 @@ void ReportEndpoint(uint64_t now) {
         lan.push(std::move(c));
     }
     body.set("lan", std::move(lan));
+    std::printf("Matching2: %s\n", net::endpoint_facts_text(facts, g.observed_ip).c_str());
     std::printf("Matching2: %s (local %u)\n", net::endpoint_choice_text(choice, g.relay_capable).c_str(), socket->port());
-    g.reported_port = choice.port;
-    g.reported_ip = choice.ip;
+    g.reported = report;
     g.udp_inflight = true;
     const uint32_t seq = g.link->request("udp", std::move(body));
     g.pending[seq] = Pending{Kind::kUdp, 0, nullptr, nullptr, 0};
@@ -1280,7 +1309,7 @@ DCP_SYSV int32_t m2_context_stop(uint16_t context) {
     }
     ClearRoom();
     g.start_wanted = false;
-    g.reported_port = 0;
+    g.reported = {};
     g.udp_acked = false;
     PushContextEvent(kCtxStopped, 0);
     std::printf("Matching2: offline\n");
@@ -1529,8 +1558,8 @@ DCP_SYSV int32_t m2_local_net_info(uint8_t* info) {
     uint32_t local = net::default_route_ip();
     uint32_t mapped = g.your_ip;
     if (g.socket) {
-        net::Endpoint stun;
-        if (g.socket->stun(&stun) == net::StunState::kDone) mapped = stun.ip;
+        const net::StunView stun = g.socket->stun();
+        if (stun.state == net::StunState::kDone) mapped = stun.mapped.ip;
     }
     Wr<uint32_t>(info, 8, __builtin_bswap32(local));
     Wr<uint32_t>(info, 0xc, __builtin_bswap32(mapped ? mapped : local));

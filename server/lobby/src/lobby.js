@@ -29,6 +29,7 @@ export const LIMITS = {
   filters: 16,
   searchMax: 20,
   lanCandidates: 4,
+  endpointMinPort: 1024,
   presenceDataBytes: 0x80,
   presenceStatusBytes: 0xc0,
   chatChars: 120,
@@ -278,6 +279,8 @@ export class Lobby {
       roomCreateAddress: new RateLimiter(PROTECTION.roomCreateAddress),
       roomJoinAccount: new RateLimiter(PROTECTION.roomJoinAccount),
       publicEndpoint: new RateLimiter(PROTECTION.publicEndpoint),
+      publicEndpointAccount: new RateLimiter(PROTECTION.publicEndpointAccount),
+      publicEndpointTarget: new RateLimiter(PROTECTION.publicEndpointTarget),
       partyReportAll: new RateLimiter(PROTECTION.partyReportAll),
       partyReportAccount: new RateLimiter(PROTECTION.partyReportAccount),
       partyReportAddress: new RateLimiter(PROTECTION.partyReportAddress),
@@ -1083,21 +1086,30 @@ export class Lobby {
     address.take(group, now);
   }
 
-  claimedIp(att, msg) {
-    return att.ip.includes(':') && ipv4Kind(msg.public_ip) === 'public' ? msg.public_ip : '';
+  // The endpoint a client asks its peers to dial on another address than the observed one. Clients before `endpoint` name
+  // only the address, from IPv6, and `port` is then that address's.
+  claimedEndpoint(att, msg) {
+    const claim = msg.endpoint === undefined && att.ip.includes(':') ? { ip: msg.public_ip, port: msg.port } : msg.endpoint;
+    if (!isObject(claim) || ipv4Kind(claim.ip) !== 'public' || !isInt(claim.port, LIMITS.endpointMinPort, 0xffff)) return null;
+    return { ip: claim.ip.split('.').map(Number).join('.'), port: claim.port };
   }
 
-  // Peers send UDP toward a client's advertised IPv4 and nothing can verify it, so each new endpoint spends budget of the
-  // observed address. Past that budget the client has no public IPv4 and its peers use the relay.
-  advertisedIp(att, msg, lan) {
-    if (!this.claimedIp(att, msg)) return '';
+  // Peers send UDP toward a claimed endpoint and nothing can verify it, so a new one spends budget of the observed address,
+  // of the account and of the address it names. Past any of them peers are not told it.
+  advertisedEndpoint(att, claim, lan) {
+    if (!claim) return null;
     const last = att.udp;
-    if (last?.public_ip === msg.public_ip && last.port === msg.port && JSON.stringify(last.lan) === JSON.stringify(lan)) {
-      return msg.public_ip;
+    if (last?.public_ip === claim.ip && last.port === claim.port && JSON.stringify(last.lan) === JSON.stringify(lan)) return claim;
+    if (this.exempt(att)) return claim;
+    const now = this.host.now();
+    const { publicEndpoint, publicEndpointAccount, publicEndpointTarget } = this.guards;
+    const budgets = [[publicEndpoint, ipGroup(att.ip)], [publicEndpointAccount, att.account], [publicEndpointTarget, claim.ip]];
+    if (budgets.every(([guard, key]) => guard.allows(key, now))) {
+      for (const [guard, key] of budgets) guard.take(key, now);
+      return claim;
     }
-    if (this.exempt(att) || this.guards.publicEndpoint.take(ipGroup(att.ip), this.host.now())) return msg.public_ip;
     this.diagnose('public_endpoint_limited');
-    return '';
+    return null;
   }
 
   // Party snapshots have their own budget, one lobby-wide and one per account and per address; a refusal spends none of
@@ -1350,7 +1362,7 @@ const HANDLERS = {
     else if (presence) this.diagnose('hello_reconnect_deduped');
     this.diagnose('hello_accepted');
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now,
-      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true } };
+      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true } };
   },
 
   worlds(att) {
@@ -1372,20 +1384,23 @@ const HANDLERS = {
     const rows = att.room ? this.memberRows(att.room) : [];
     const me = rows.find((m) => m.member === att.member);
     const lanText = JSON.stringify(lan);
-    const differs = (ip) => me.ip !== att.ip || me.public_ip !== ip || me.port !== msg.port || me.lan !== lanText;
-    if (me && differs(this.claimedIp(att, msg))) this.limitWrite(att, 'state');
-    const publicIp = this.advertisedIp(att, msg, lan);
-    att.udp = { ip: att.ip, public_ip: publicIp, port: msg.port, lan };
+    // Without an accepted claim `port` goes with the observed address, never with the claimed one.
+    const stored = (claim) => ({ public_ip: claim?.ip ?? '', port: claim?.port ?? msg.port });
+    const differs = (to) => me.ip !== att.ip || me.public_ip !== to.public_ip || me.port !== to.port || me.lan !== lanText;
+    const claim = this.claimedEndpoint(att, msg);
+    if (me && differs(stored(claim))) this.limitWrite(att, 'state');
+    const told = stored(this.advertisedEndpoint(att, claim, lan));
+    att.udp = { ip: att.ip, ...told, lan };
     if (me) {
-      const changed = differs(publicIp);
+      const changed = differs(told);
       if (changed) {
         this.host.sql.run('UPDATE members SET ip = ?, public_ip = ?, port = ?, lan = ? WHERE room = ? AND member = ?', att.ip,
-          publicIp, msg.port, lanText, att.room, att.member);
-        Object.assign(me, { ip: att.ip, public_ip: publicIp, port: msg.port, lan: lanText });
+          told.public_ip, told.port, lanText, att.room, att.member);
+        Object.assign(me, { ip: att.ip, ...told, lan: lanText });
       }
-      if (changed || !publicIp) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
+      if (changed || !told.public_ip) for (const other of rows) if (other.member !== att.member) this.sendPeer(att.room, me, other);
     }
-    return { ip: att.ip, port: msg.port, ...(publicIp && { public_ip: publicIp }) };
+    return { ip: att.ip, port: told.port, ...(told.public_ip && { public_ip: told.public_ip }) };
   },
 
   'room.create'(att, msg) {

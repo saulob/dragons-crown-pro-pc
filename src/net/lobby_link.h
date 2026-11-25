@@ -65,6 +65,8 @@ bool story_session_capability(const Json& hello_reply);
 bool boss_battle_session_capability(const Json& hello_reply);
 // Whether the lobby relays the room's custom looks (`appearance`); an older lobby says nothing.
 bool appearance_capability(const Json& hello_reply);
+// Whether the lobby takes a `udp` report's `endpoint` on another address than the one it observes.
+bool udp_endpoint_capability(const Json& hello_reply);
 
 // Relay frames waiting for the socket; a link this far behind is not carrying a game any more.
 inline constexpr size_t kMaxQueuedBinary = 512;

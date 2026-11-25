@@ -246,7 +246,104 @@ test('advertised endpoint: anything but a public IPv4 is ignored', () => {
   }
 });
 
-test('advertised endpoint: an IPv4 client cannot claim another address', () => {
+const PROXY = '203.0.113.12';
+const UDP_EXIT = { ip: '198.51.100.11', port: 59547 };
+
+test('advertised endpoint: issue #75, the lobby connection through a proxy and UDP outside it', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, PROXY);
+  const reported = host.call('udp', { port: 3658, endpoint: UDP_EXIT });
+  assert.deepEqual([reported.ip, reported.public_ip, reported.port], [PROXY, UDP_EXIT.ip, UDP_EXIT.port]);
+  assert.deepEqual(memberRow(env, room, 0x10), { ip: PROXY, public_ip: UDP_EXIT.ip, port: UDP_EXIT.port });
+  const remote = greeted(env, '192.0.2.20');
+  remote.call('udp', { port: 50000 });
+  assert.equal(remote.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port, e.lan]), [[UDP_EXIT.ip, UDP_EXIT.port, undefined]]);
+  assert.deepEqual(host.events('peer').map((e) => [e.ip, e.port]), [['192.0.2.20', 50000]]);
+});
+
+test('advertised endpoint: both players behind one proxy get each other\'s own UDP endpoint', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, PROXY);
+  host.call('udp', { port: 3658, endpoint: UDP_EXIT });
+  const friend = greeted(env, PROXY);
+  friend.call('udp', { port: 3658, endpoint: { ip: '192.0.2.40', port: 13447 } });
+  assert.equal(friend.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(friend.events('peer').map((e) => [e.ip, e.port]), [[UDP_EXIT.ip, UDP_EXIT.port]]);
+  assert.deepEqual(host.events('peer').map((e) => [e.ip, e.port]), [['192.0.2.40', 13447]]);
+});
+
+test('advertised endpoint: a refused or invalid claim leaves the observed address with its own port', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, PROXY);
+  const peer = greeted(env, '192.0.2.20');
+  assert.equal(peer.call('room.join', { room: room.id }).code, 'ok');
+  const bad = [null, '', 7, [], {}, '198.51.100.11:59547', { ip: UDP_EXIT.ip }, { port: 59547 }, { ip: UDP_EXIT.ip, port: 0 },
+    { ip: UDP_EXIT.ip, port: 53 }, { ip: UDP_EXIT.ip, port: LIMITS.endpointMinPort - 1 }, { ip: UDP_EXIT.ip, port: 65536 },
+    { ip: UDP_EXIT.ip, port: '59547' }, { ip: UDP_EXIT.ip, port: 59547.5 },
+    ...['0.0.0.0', '127.0.0.1', '10.0.0.1', '172.16.0.1', '192.168.1.1', '169.254.1.1', '100.64.0.13', '224.0.0.1', '255.255.255.255',
+      '2001:db8::1', '::ffff:198.51.100.11', 'example.com', '198.51.100', '198.51.100.256'].map((ip) => ({ ip, port: 59547 }))];
+  for (const endpoint of bad) {
+    const reported = host.call('udp', { port: 3658, endpoint });
+    assert.deepEqual([reported.code, reported.ip, reported.port, reported.public_ip], ['ok', PROXY, 3658, undefined], JSON.stringify(endpoint));
+  }
+  assert.deepEqual(memberRow(env, room, 0x10), { ip: PROXY, public_ip: '', port: 3658 });
+  assert.ok(peer.events('peer').every((e) => e.ip === PROXY && e.port === 3658));
+  assert.equal(env.lobby.guards.publicEndpoint.buckets.size, 0);
+  assert.equal(host.call('udp', { port: 0, endpoint: UDP_EXIT }).code, 'bad_request');
+});
+
+test('advertised endpoint: one spelling of an address, whatever the client writes', () => {
+  const env = makeLobby();
+  const client = greeted(env, PROXY);
+  assert.equal(client.call('udp', { port: 3658, endpoint: { ip: '198.051.100.011', port: 59547 } }).public_ip, UDP_EXIT.ip);
+  assert.ok(env.lobby.guards.publicEndpointTarget.buckets.has(UDP_EXIT.ip));
+});
+
+test('advertised endpoint: IPv6 to the lobby and an endpoint, with the older form still taken', () => {
+  for (const report of [{ port: 3658, endpoint: UDP_EXIT }, { port: UDP_EXIT.port, public_ip: UDP_EXIT.ip }]) {
+    const env = makeLobby();
+    const { host, room } = hostRoom(env, OBSERVED_A);
+    const reported = host.call('udp', report);
+    assert.deepEqual([reported.ip, reported.public_ip, reported.port], [OBSERVED_A, UDP_EXIT.ip, UDP_EXIT.port]);
+    assert.deepEqual(memberRow(env, room, 0x10), { ip: OBSERVED_A, public_ip: UDP_EXIT.ip, port: UDP_EXIT.port });
+  }
+});
+
+test('advertised endpoint: only the room\'s other members are told, and nobody before a room', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, PROXY);
+  const outsider = greeted(env, '192.0.2.30');
+  const elsewhere = greeted(env, '192.0.2.31');
+  assert.equal(elsewhere.call('room.create', ROOM).code, 'ok');
+  const guest = greeted(env, '203.0.113.50');
+  guest.call('udp', { port: 3658, endpoint: UDP_EXIT });
+  for (const c of [host, outsider, elsewhere]) assert.deepEqual(c.events('peer'), []);
+  assert.equal(guest.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(host.events('peer').map((e) => [e.ip, e.port]), [[UDP_EXIT.ip, UDP_EXIT.port]]);
+  guest.call('udp', { port: 3658, endpoint: { ...UDP_EXIT, port: 59600 } });
+  assert.deepEqual(host.events('peer').map((e) => e.port), [59600]);
+  for (const c of [outsider, elsewhere]) assert.deepEqual(c.events('peer'), []);
+  const stranger = env.connect('192.0.2.32');
+  assert.equal(stranger.call('udp', { port: 3658, endpoint: UDP_EXIT }).code, 'no_session');
+});
+
+test('advertised endpoint: an endpoint that changes during a room reaches its members', () => {
+  const env = makeLobby();
+  const { host, room } = hostRoom(env, PROXY);
+  const remote = greeted(env, '192.0.2.20');
+  remote.call('udp', { port: 50000 });
+  host.call('udp', { port: 3658 });
+  assert.equal(remote.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port]), [[PROXY, 3658]]);
+  host.call('udp', { port: 3658, endpoint: UDP_EXIT });
+  host.call('udp', { port: 3658, endpoint: { ip: '192.0.2.99', port: 61000 } });
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port]), [[UDP_EXIT.ip, UDP_EXIT.port], ['192.0.2.99', 61000]]);
+  host.call('udp', { port: 3658 });
+  assert.deepEqual(remote.events('peer').map((e) => [e.ip, e.port]), [[PROXY, 3658]]);
+});
+
+test('advertised endpoint: an IPv4 client cannot claim another address by public_ip alone', () => {
   const env = makeLobby();
   const { host, room } = hostRoom(env, '198.51.100.20');
   const reported = host.call('udp', { port: 50000, public_ip: ADVERTISED });
@@ -280,6 +377,17 @@ test('LAN candidates: claiming a member\'s real address reveals nothing, in a ro
   assert.deepEqual(victim.events('peer').map((e) => e.lan), [undefined]);
 });
 
+test('LAN candidates: an endpoint on a member\'s address reveals nothing', () => {
+  const env = makeLobby();
+  const { host: victim, room } = hostRoom(env, '198.51.100.20');
+  victim.call('udp', { port: 3658, lan: [{ ip: '192.168.1.10', port: 3658 }] });
+  const attacker = greeted(env, PROXY);
+  attacker.call('udp', { port: 3658, endpoint: { ip: '198.51.100.20', port: 3658 }, lan: [{ ip: '192.168.1.66', port: 3658 }] });
+  assert.equal(attacker.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(attacker.events('peer').map((e) => e.lan), [undefined]);
+  assert.deepEqual(victim.events('peer').map((e) => e.lan), [undefined]);
+});
+
 test('LAN candidates: the same observed address still shares them, on IPv4 and IPv6', () => {
   for (const [observed, advertised] of [['198.51.100.20', undefined], [OBSERVED_A, ADVERTISED]]) {
     const env = makeLobby();
@@ -291,6 +399,19 @@ test('LAN candidates: the same observed address still shares them, on IPv4 and I
     assert.deepEqual(sameAddress.events('peer').map((e) => e.lan), [[{ ip: '192.168.1.10', port: 3658 }]]);
     assert.deepEqual(host.events('peer').map((e) => e.lan), [[{ ip: '192.168.1.11', port: 3659 }]]);
   }
+});
+
+test('old clients: hello says the lobby takes endpoints, and a room mixes both kinds', () => {
+  const env = makeLobby();
+  assert.equal(env.connect().hello().capabilities.udp_endpoint, true);
+  const { host, room } = hostRoom(env, PROXY);
+  host.call('udp', { port: 3658, endpoint: UDP_EXIT });
+  const old = greeted(env, '192.0.2.20');
+  assert.deepEqual(Object.keys(old.call('udp', { port: 50000, lan: [] })).sort(), ['code', 'ip', 'port', 're']);
+  assert.equal(old.call('room.join', { room: room.id }).code, 'ok');
+  assert.deepEqual(old.events('peer').map((e) => [Object.keys(e).sort().join(), e.ip, e.port]),
+    [['account,ev,ip,member,port,room', UDP_EXIT.ip, UDP_EXIT.port]]);
+  assert.deepEqual(host.events('peer').map((e) => [e.ip, e.port]), [['192.0.2.20', 50000]]);
 });
 
 test('old clients: port only works as before, and an IPv6 one gives peers nothing to dial', () => {

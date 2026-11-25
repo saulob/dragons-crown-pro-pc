@@ -203,9 +203,9 @@ std::string StunList(uint16_t port) {
 }
 
 // The path a public lobby takes, which a loopback lobby never reaches: the lobby treats this client as coming from
-// `observed` and a stand-in answers STUN with a public address. Peers are told that address but nothing dials it: every
-// socket here is bound to loopback.
-int RunEndpointScenario(const std::string& lobby_root, const std::string& observed) {
+// `observed` and a stand-in answers STUN with a public address, `udp_ip` when UDP takes another path. Peers are told that
+// address but nothing dials it: every socket here is bound to loopback.
+int RunEndpointScenario(const std::string& lobby_root, const std::string& observed, const std::string& udp_ip) {
     const std::string lobby = lobby_root + "?observed=" + observed;
     const fs::path base = fs::temp_directory_path() / "dcp-online-endpoint-tests";
     fs::remove_all(base);
@@ -261,8 +261,21 @@ int RunEndpointScenario(const std::string& lobby_root, const std::string& observ
         return found;
     };
     CHECK(next([](const net::LobbyMessage& m) { return m.kind == net::LobbyMessage::Kind::kUp; }));
+    net::socket_t listener = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    const sockaddr_in any = net::to_sockaddr({net::parse_ip("127.0.0.1"), 0});
+    CHECK(bind(listener, reinterpret_cast<const sockaddr*>(&any), sizeof(any)) == 0 && net::set_nonblocking(listener));
+    sockaddr_in listening{};
+    socklen_t length = sizeof(listening);
+    getsockname(listener, reinterpret_cast<sockaddr*>(&listening), &length);
+    auto punched = [&] {
+        uint8_t data[64];
+        bool found = false;
+        for (int n; (n = int(recv(listener, reinterpret_cast<char*>(data), sizeof(data), 0))) > 0;)
+            found = found || (n == 12 && data[0] == 'D' && data[1] == 'N' && data[3] == 8);
+        return found;
+    };
     net::Json udp = net::Json::Object();
-    udp.set("port", int64_t(40000));
+    udp.set("port", int64_t(ntohs(listening.sin_port)));
     guest.request("udp", udp);
     auto join_guest = [&] {
         net::Json join = net::Json::Object();
@@ -278,8 +291,8 @@ int RunEndpointScenario(const std::string& lobby_root, const std::string& observ
     };
 
     const bool ipv6 = observed.find(':') != std::string::npos;
-    const std::string public_ip = ipv6 ? "198.51.100.25" : observed;
-    if (ipv6) {
+    const std::string public_ip = !udp_ip.empty() ? udp_ip : ipv6 ? "198.51.100.25" : observed;
+    if (ipv6 || !udp_ip.empty()) {
         net::FakeStun late({net::parse_ip(public_ip), 41000}, 6000);
         g_settings.config.stun = StunList(late.port());
         const auto bound = std::chrono::steady_clock::now();
@@ -288,22 +301,26 @@ int RunEndpointScenario(const std::string& lobby_root, const std::string& observ
         CHECK(online::peer_socket() != nullptr);
         expect_peer(observed, online::peer_socket() ? online::peer_socket()->port() : 0);
         CHECK(std::chrono::steady_clock::now() - bound >= std::chrono::milliseconds(4500));
-        CHECK(net::signaling_endpoint({net::parse_ip(observed), 3658}, 0x10) == net::relay_endpoint(0x10));
+        CHECK(!ipv6 || net::signaling_endpoint({net::parse_ip(observed), 3658}, 0x10) == net::relay_endpoint(0x10));
         expect_peer(public_ip, 41000);
         CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);
     }
-    net::FakeStun quick({net::parse_ip(public_ip), 41001});
+    const uint16_t quick_port = udp_ip.empty() ? 41001 : 59547;
+    net::FakeStun quick({net::parse_ip(public_ip), quick_port});
     g_settings.config.stun = StunList(quick.port());
+    punched();
     const auto bound = std::chrono::steady_clock::now();
     const int32_t sock = BindP2pSocket();
-    if (!ipv6) join_guest();
-    expect_peer(public_ip, 41001);
+    if (!ipv6 && udp_ip.empty()) join_guest();
+    else CHECK(PumpUntil(punched, 1000)); // a guest known before the bind is let in at once
+    expect_peer(public_ip, quick_port);
     CHECK(std::chrono::steady_clock::now() - bound < std::chrono::milliseconds(4000));
 
     CHECK(Fn<Close>("sceNetSocketClose")(sock) == 0);
     CHECK(Fn<Stop>("sceNpMatching2ContextStop")(ctx) == 0);
     PumpUntil([] { return false; }, 100);
     guest.stop();
+    net::close_socket(listener);
     std::printf("GROUP|endpoint-path|%s\n", g_failures ? "FAIL" : "PASS");
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);
     return g_failures ? 1 : 0;
@@ -954,7 +971,8 @@ int main(int argc, char** argv) {
     }
     const fs::path base = fs::temp_directory_path() / "dcp-online-hle-tests";
     fs::remove_all(base);
-    if (argc == 3 && std::strcmp(argv[1], "--endpoint-scenario") == 0) return RunEndpointScenario(url, argv[2]);
+    if ((argc == 3 || argc == 4) && std::strcmp(argv[1], "--endpoint-scenario") == 0)
+        return RunEndpointScenario(url, argv[2], argc == 4 ? argv[3] : "");
     UseHost(url, base);
 
     using Register = int32_t SYSV (*)(uint16_t, void*, void*);

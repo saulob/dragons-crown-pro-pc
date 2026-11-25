@@ -9,6 +9,8 @@ export const PROTECTION = {
   roomCreateAddress: { burst: 20, perSecond: 1 / 6 },
   roomJoinAccount: { burst: 20, perSecond: 1 / 5 },
   publicEndpoint: { burst: 8, perSecond: 1 / 30 },
+  publicEndpointAccount: { burst: 8, perSecond: 1 / 30 },
+  publicEndpointTarget: { burst: 24, perSecond: 1 / 5 },
   partyReportAll: { burst: 30, perSecond: 1 / 30 },
   partyReportAccount: { burst: 3, perSecond: 1 / 120 },
   partyReportAddress: { burst: 12, perSecond: 1 / 30 },

@@ -61,6 +61,10 @@ bool appearance_capability(const Json& hello_reply) {
     return hello_reply["capabilities"]["appearance"].as_bool();
 }
 
+bool udp_endpoint_capability(const Json& hello_reply) {
+    return hello_reply["capabilities"]["udp_endpoint"].as_bool();
+}
+
 LobbyLink::LobbyLink(Options options) : options_(std::move(options)) {}
 
 LobbyLink::~LobbyLink() { stop(); }

@@ -266,3 +266,23 @@ test('a new connection taking a seat from a live socket learns the room as well'
   assert.deepEqual(endpoints(back), [[0x10, A_IP, 41000], [0x30, C_IP, 41002]]);
   assert.deepEqual(endpoints(b), []);
 });
+
+test('issue #75: a reconnect through another proxy address keeps the UDP endpoint peers get', () => {
+  const env = makeLobby();
+  const a = openRoom(env, A_IP, 41000);
+  const b = joined(env, a.room, '203.0.113.11', 3658);
+  const endpoint = { ip: '198.51.100.11', port: 60455 };
+  b.call('udp', { port: 3658, endpoint });
+  a.events('peer');
+  for (const proxy of ['198.51.100.21', '198.51.100.14']) {
+    b.drop();
+    const back = fresh(env, b, proxy);
+    resume(back, b);
+    assert.deepEqual(endpoints(a), []);
+    back.call('udp', { port: 3658, endpoint });
+    assert.deepEqual(endpoints(a), [[0x20, endpoint.ip, endpoint.port]]);
+    assert.deepEqual(env.host.sql.get('SELECT ip, public_ip, port FROM members WHERE member = 32'),
+      { ip: proxy, public_ip: endpoint.ip, port: endpoint.port });
+    Object.assign(b, back);
+  }
+});

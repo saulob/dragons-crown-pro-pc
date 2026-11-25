@@ -140,27 +140,70 @@ std::string Fixed(const char* format, double value) {
 
 } // namespace
 
-EndpointChoice choose_endpoint(uint32_t lobby_ip, bool lobby_on_lan, uint16_t local_port, StunState stun, const Endpoint& mapped,
-                               const Endpoint& upnp) {
-    if (lobby_on_lan) return {EndpointSource::kLan, local_port, lobby_ip};
-    const bool stun_done = stun == StunState::kDone;
-    uint32_t ip = lobby_ip;
-    if (!ip && stun_done && classify(mapped.ip) == AddressKind::kPublic) ip = mapped.ip;
-    if (!ip && classify(upnp.ip) == AddressKind::kPublic) ip = upnp.ip;
-    if (!ip) return {EndpointSource::kRelayFallback, local_port, 0};
-    if (upnp.valid() && upnp.ip == ip) return {EndpointSource::kUpnp, upnp.port, ip};
-    if (stun_done) return {EndpointSource::kStun, mapped.port, ip};
-    return {EndpointSource::kLobby, local_port, ip};
+EndpointChoice choose_endpoint(const EndpointFacts& f) {
+    const Endpoint observed{f.lobby_ip, f.local_port};
+    if (f.lobby_on_lan) return {EndpointSource::kLan, observed};
+    const auto usable = [&f](const Endpoint& e) {
+        return e.valid() && classify(e.ip) == AddressKind::kPublic && (f.lobby_takes_endpoint || !f.lobby_ip || e.ip == f.lobby_ip);
+    };
+    const bool stun = f.stun.state == StunState::kDone && usable(f.stun.mapped), upnp = usable(f.upnp);
+    // A router's mapping is open to everyone, so it wins when STUN sees the same public address, or a mapping that
+    // changes with the destination.
+    if (upnp && (!stun || f.upnp.ip == f.stun.mapped.ip || f.stun.mapping == NatMapping::kPerDestination)) {
+        return {EndpointSource::kUpnp, f.upnp};
+    }
+    if (stun) return {EndpointSource::kStun, f.stun.mapped};
+    return {f.lobby_ip ? EndpointSource::kLobby : EndpointSource::kRelayFallback, observed};
+}
+
+EndpointReport endpoint_report(const EndpointChoice& choice, const EndpointFacts& f) {
+    if (!choice.at.ip || choice.at.ip == f.lobby_ip) return {choice.at.port, 0, {}};
+    if (f.lobby_takes_endpoint) return {f.local_port, 0, choice.at};
+    return {choice.at.port, choice.at.ip, {}};
+}
+
+bool paths_differ(const EndpointFacts& f) {
+    return classify(f.lobby_ip) == AddressKind::kPublic && f.stun.state == StunState::kDone && f.stun.mapped.ip != f.lobby_ip;
+}
+
+bool endpoint_settled(const EndpointFacts& f, bool upnp_working) {
+    if (f.lobby_on_lan) return true;
+    if (f.stun.state == StunState::kRunning) return false;
+    return !upnp_working || (f.lobby_takes_endpoint && paths_differ(f) && f.stun.mapping == NatMapping::kSame);
+}
+
+std::string endpoint_facts_text(const EndpointFacts& f, const std::string& observed_ip) {
+    std::string text = "lobby observes " + (observed_ip.empty() ? std::string("no address") : observed_ip) + "; STUN ";
+    switch (f.stun.state) {
+    case StunState::kIdle: text += "off"; break;
+    case StunState::kRunning: text += "not answered yet"; break;
+    case StunState::kFailed: text += "no answer"; break;
+    case StunState::kDone:
+        text += endpoint_text(f.stun.mapped);
+        switch (f.stun.mapping) {
+        case NatMapping::kUnknown: text += " (not confirmed yet)"; break;
+        case NatMapping::kOneServer: text += " (one server only)"; break;
+        case NatMapping::kSame: text += " (two servers agree)"; break;
+        case NatMapping::kPerDestination: text += " (changes with the destination)"; break;
+        }
+        break;
+    }
+    text += "; UPnP " + (f.upnp.valid() ? endpoint_text(f.upnp) : std::string("none"));
+    if (paths_differ(f)) {
+        text += "; the lobby connection and UDP use different public addresses";
+        if (!f.lobby_takes_endpoint) text += ", and this lobby can only share the one it observes";
+    }
+    return text;
 }
 
 std::string endpoint_choice_text(const EndpointChoice& choice, bool relay_available) {
-    const std::string at = endpoint_text({choice.ip, choice.port});
+    const std::string at = endpoint_text(choice.at);
     switch (choice.source) {
     case EndpointSource::kLan:
-        return choice.ip ? "reporting LAN endpoint " + at : "reporting LAN endpoint on port " + std::to_string(choice.port);
+        return choice.at.ip ? "reporting LAN endpoint " + at : "reporting LAN endpoint on port " + std::to_string(choice.at.port);
     case EndpointSource::kUpnp: return "reporting public UPnP endpoint " + at;
     case EndpointSource::kStun: return "reporting public STUN endpoint " + at;
-    case EndpointSource::kLobby: return "reporting lobby-observed endpoint " + at;
+    case EndpointSource::kLobby: return "reporting lobby-observed address with the local port " + at;
     case EndpointSource::kRelayFallback: break;
     }
     return relay_available ? "public endpoint unavailable, relay fallback" : "public endpoint unavailable, relay not offered";
@@ -217,7 +260,7 @@ std::unique_ptr<PeerSocket> PeerSocket::open(const Options& options, std::string
     p->port_ = ntohs(bound.sin_port);
     p->options_ = options;
     if (!options.stun_servers.empty()) {
-        p->stun_state_ = StunState::kRunning;
+        p->stun_.state = StunState::kRunning;
         const auto servers = options.stun_servers;
         PeerSocket* self = p.get();
         p->stun_resolver_ = std::thread([self, servers] {
@@ -284,7 +327,14 @@ void PeerSocket::set_peer(uint64_t account, std::vector<Endpoint> candidates, ui
     candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [](const Endpoint& e) { return !e.valid(); }),
                      candidates.end());
     auto& known = peers_[account];
-    if (known != candidates) std::printf("P2P: peer %llu at %s\n", (unsigned long long)account, Candidates(candidates).c_str());
+    if (known != candidates) {
+        std::printf("P2P: peer %llu at %s\n", (unsigned long long)account, Candidates(candidates).c_str());
+        // A new endpoint gets the head start the old one had.
+        Link* link = ByAccount(account);
+        if (link && link->state == LinkState::kConnecting && !link->relay_offered &&
+            Now() - link->started_ms < uint64_t(options_.relay_after_ms))
+            link->direct_ms = Now();
+    }
     known = std::move(candidates);
 }
 
@@ -335,7 +385,7 @@ PeerSocket::Link& PeerSocket::NewLink(uint64_t account, uint64_t now) {
     link.account = account;
     link.tag = RandomTag();
     link.nonce = RandomTag();
-    link.started_ms = link.last_rx_ms = link.last_tx_ms = now;
+    link.started_ms = link.direct_ms = link.last_rx_ms = link.last_tx_ms = now;
     link.next_hello_ms = now;
     link.stats.rto_ms = link.rto_ms;
     return link;
@@ -420,10 +470,9 @@ LinkStats PeerSocket::stats(int id) const {
     return out;
 }
 
-StunState PeerSocket::stun(Endpoint* mapped) const {
+StunView PeerSocket::stun() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (mapped) *mapped = stun_mapped_;
-    return stun_state_;
+    return stun_;
 }
 
 void PeerSocket::punch(const Endpoint& to) {
@@ -487,7 +536,7 @@ bool PeerSocket::HasDirect(uint64_t account) const {
 }
 
 bool PeerSocket::RelayReachable(const Link& link, uint64_t now) const {
-    return CanRelay(link) && (!HasDirect(link.account) || now - link.started_ms >= uint64_t(options_.relay_after_ms));
+    return CanRelay(link) && (!HasDirect(link.account) || now - link.direct_ms >= uint64_t(options_.relay_after_ms));
 }
 
 bool PeerSocket::CanRelay(const Link& link) const { return relay_send_ && relay_members_.count(link.account); }
@@ -805,12 +854,7 @@ void PeerSocket::Data(Link& link, const uint8_t* body, size_t size, uint64_t now
 void PeerSocket::Receive(const uint8_t* data, size_t size, const Endpoint& from, uint64_t now) {
     if (stun::looks_like_stun(data, size)) {
         Endpoint mapped;
-        if (stun_state_ == StunState::kRunning && stun::parse_response(data, size, stun_id_, mapped)) {
-            stun_state_ = StunState::kDone;
-            stun_mapped_ = mapped;
-            std::printf("P2P: STUN: public endpoint %s (local port %u, server %s)\n", endpoint_text(mapped).c_str(), port_,
-                        endpoint_text(from).c_str());
-        }
+        if (stun_asked_.valid() && stun::parse_response(data, size, stun_id_, mapped)) StunAnswer(mapped, from, now);
         return;
     }
     if (size < kHeader || data[0] != 'D' || data[1] != 'N' || data[2] != kVersion) return;
@@ -1093,24 +1137,77 @@ void PeerSocket::Timers(uint64_t now) {
     }
 }
 
+void PeerSocket::AskStun(const Endpoint& server, bool new_request) {
+    if (new_request) random_bytes(stun_id_.data(), stun_id_.size());
+    stun_asked_ = server;
+    uint8_t request[stun::kRequestSize];
+    stun::make_request(stun_id_, request);
+    SendRaw(server, request, sizeof(request));
+}
+
+void PeerSocket::NextStunServer() {
+    ++stun_index_;
+    stun_attempt_ = 0;
+    stun_next_ms_ = 0;
+}
+
+// The first answer is the endpoint; another server then confirms the mapping, and later answers keep it current.
+void PeerSocket::StunAnswer(const Endpoint& mapped, const Endpoint& from, uint64_t now) {
+    const Endpoint server = std::exchange(stun_asked_, Endpoint{});
+    if (stun_.state != StunState::kDone) {
+        stun_.state = StunState::kDone;
+        stun_.mapped = mapped;
+        stun_server_ = server;
+        stun_confirming_ = true;
+        NextStunServer();
+        std::printf("P2P: STUN: public endpoint %s (local port %u, server %s)\n", endpoint_text(mapped).c_str(), port_,
+                    endpoint_text(from).c_str());
+    } else if (server != stun_server_) {
+        stun_confirming_ = false;
+        stun_.mapping = mapped == stun_.mapped ? NatMapping::kSame : NatMapping::kPerDestination;
+        stun_next_ms_ = now + uint64_t(options_.stun_refresh_ms);
+        if (stun_.mapping == NatMapping::kSame) {
+            std::printf("P2P: STUN: server %s sees the same endpoint\n", endpoint_text(from).c_str());
+        } else {
+            std::printf("P2P: STUN: server %s sees %s instead (endpoint-dependent or symmetric NAT); direct is not guaranteed\n",
+                        endpoint_text(from).c_str(), endpoint_text(mapped).c_str());
+        }
+    } else if (mapped != stun_.mapped) {
+        std::printf("P2P: STUN: public endpoint changed from %s to %s\n", endpoint_text(stun_.mapped).c_str(),
+                    endpoint_text(mapped).c_str());
+        stun_.mapped = mapped;
+    }
+}
+
 void PeerSocket::StunStep(uint64_t now) {
-    if (stun_state_ != StunState::kRunning || !stun_resolved_) return;
+    if (!stun_resolved_) return;
+    if (stun_.state == StunState::kDone && !stun_confirming_) {
+        if (now < stun_next_ms_) return;
+        stun_next_ms_ = now + uint64_t(options_.stun_refresh_ms);
+        AskStun(stun_server_, true);
+        return;
+    }
+    if (stun_.state != StunState::kRunning && !stun_confirming_) return;
+    while (stun_confirming_ && stun_index_ < stun_addresses_.size() && stun_addresses_[stun_index_] == stun_server_) ++stun_index_;
     if (stun_index_ >= stun_addresses_.size()) {
-        stun_state_ = StunState::kFailed;
-        std::printf("P2P: STUN: no server answered; peers will use the lobby's view of this address\n");
+        if (stun_confirming_) {
+            stun_confirming_ = false;
+            stun_.mapping = NatMapping::kOneServer;
+            stun_next_ms_ = now + uint64_t(options_.stun_refresh_ms);
+            std::printf("P2P: STUN: only one server answered; the endpoint is not confirmed\n");
+        } else {
+            stun_.state = StunState::kFailed;
+            std::printf("P2P: STUN: no server answered\n");
+        }
         return;
     }
     if (stun_attempt_ == 0) stun_server_deadline_ms_ = now + 3000;
     if (now >= stun_server_deadline_ms_ && stun_attempt_ > 0) {
-        ++stun_index_;
-        stun_attempt_ = 0;
+        NextStunServer();
         return;
     }
     if (now < stun_next_ms_) return;
-    if (stun_attempt_ == 0) random_bytes(stun_id_.data(), stun_id_.size());
-    uint8_t request[stun::kRequestSize];
-    stun::make_request(stun_id_, request);
-    SendRaw(stun_addresses_[stun_index_], request, sizeof(request));
+    AskStun(stun_addresses_[stun_index_], stun_attempt_ == 0);
     static constexpr uint64_t kGaps[] = {250, 500, 1000, 1000};
     stun_next_ms_ = now + kGaps[std::min(stun_attempt_, 3)];
     ++stun_attempt_;

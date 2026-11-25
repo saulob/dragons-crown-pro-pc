@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <thread>
 
 #include "net/addr.h"
@@ -34,6 +35,10 @@ public:
     }
     uint16_t port() const { return port_; }
     uint16_t last_source() const { return source_; }
+    void set_mapped(const Endpoint& mapped) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        mapped_ = mapped;
+    }
 
 private:
     void Run() {
@@ -50,7 +55,9 @@ private:
             const uint32_t ip = ntohl(from.sin_addr.s_addr);
             source_ = port;
             if (std::chrono::steady_clock::now() < answer_from_) continue;
+            std::unique_lock<std::mutex> lock(mutex_);
             const Endpoint answer = mapped_.valid() ? mapped_ : Endpoint{ip, port};
+            lock.unlock();
             uint8_t response[32] = {0x01, 0x01, 0x00, 0x0c, 0x21, 0x12, 0xa4, 0x42};
             std::memcpy(response + 8, buffer + 8, 12);
             const uint16_t xport = answer.port ^ 0x2112;
@@ -62,6 +69,7 @@ private:
                    reinterpret_cast<const sockaddr*>(&from), sizeof(from));
         }
     }
+    std::mutex mutex_;
     Endpoint mapped_;
     std::chrono::steady_clock::time_point answer_from_;
     socket_t s_;

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Compiles the shared online layer with the POSIX WebSocket and runs tests/net_tests.cpp on Linux: no CMake, no game
 # code, no window. tools/test.ps1 runs it through WSL; it works on any Linux with g++ and the OpenSSL headers.
-# Usage: tools/test-linux-net.sh [repository root]
+# Usage: tools/test-linux-net.sh [repository root [test group...]]
 set -u
 root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+shift $(($# > 0))
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root" || exit 2
@@ -33,7 +34,7 @@ cat "$work/net_tests.log"
 g++ "$work"/*.o -o "$work/net_tests" -lssl -lcrypto -lpthread || { echo "LINUX-NET|link|FAIL"; exit 1; }
 echo "LINUX-NET|compile|PASS"
 
-cd "$work" && ./net_tests
+cd "$work" && ./net_tests "$@"
 status=$?
 echo "LINUX-NET|run|$([ "$status" = 0 ] && echo PASS || echo FAIL)"
 exit "$status"

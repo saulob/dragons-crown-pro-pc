@@ -308,7 +308,7 @@ test('a client that never sends party reports behaves exactly as before and adds
 test('the hello answer is unchanged: no capability announces party reports', () => {
   const env = makeLobby();
   const reply = env.connect().hello(GAME);
-  assert.deepEqual(reply.capabilities, { relay_supported: true, relay_max_payload: 1200, story_session: true, boss_battle_session: true, appearance: true });
+  assert.deepEqual(reply.capabilities, { relay_supported: true, relay_max_payload: 1200, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true });
   assert.deepEqual(Object.keys(reply).sort(), ['account', 'capabilities', 'code', 'friend_code', 'ip', 'name', 're', 'time']);
 });
 

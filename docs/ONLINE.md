@@ -28,11 +28,13 @@ becomes a CPU ally). Play between PCs on different Internet connections (NAT tra
    UDP port (`online_udp_port`, `DCP_UDP_PORT`), asks for a new one. The test binds the game's UDP port (3658, or the
    configured one) and uses that one socket for STUN and the UPnP probe; when the port cannot be opened it says so
    instead of using another. On Windows this gives Windows Firewall the chance to ask for network access before the
-   game starts. "Ready for online play" means other
-   players can probably reach you, directly or through the relay; otherwise the lines below it say what is missing.
+   game starts. "Ready for online play" means other players can probably reach you directly, "Ready for online play
+   through the relay" that a match will work but not directly, and "direct depends on your network" that the online
+   service and the game's UDP see different public addresses (a proxy or VPN); otherwise the lines below it say what is
+   missing. The log has the addresses and the endpoint a match would report.
    "Online service: Connected · N ms" is the time the online service took to answer the test's sign-in, measured once
    per test; it is not the Ping to players. "Direct connections" says a UDP endpoint is available; whether a given player
-   can really reach it is only known when joining a match. "Relay: Available" appears when the online service said in
+   can really reach it is only known when joining a match. "Relay fallback: Available" appears when the online service said in
    its sign-in answer that it relays (`capabilities.relay_supported`) and the UDP port opened; the test sends no relay
    frame, so it does not prove a path to any player.
 6. **Ping display** On shows the in-game Ping from the start; **F3** shows or hides it while playing.
@@ -610,9 +612,9 @@ lower-case hex.
 
 | op | request | answer |
 |---|---|---|
-| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay), `story_session`, `boss_battle_session`, `appearance` (optional) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload, story_session, boss_battle_session, appearance}` (absent from an older lobby) |
+| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay), `story_session`, `boss_battle_session`, `appearance` (optional) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload, story_session, boss_battle_session, appearance, udp_endpoint}` (absent from an older lobby) |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
-| `udp` | `port`, `lan: [{ip, port}]` (<= 4, LAN/loopback only), `public_ip` (optional, public IPv4 of a client connected over IPv6) | `ip` (as the lobby sees it), `port`, `public_ip` (when accepted) |
+| `udp` | `port` (on the address the lobby sees), `lan: [{ip, port}]` (<= 4, LAN/loopback only), `endpoint: {ip, port}` (optional, the client's public IPv4 UDP endpoint when it is on another address; port >= 1024; only to a lobby with `udp_endpoint`), `public_ip` (clients up to 1.5.0 connected over IPv6: the address `port` is on) | `ip` (as the lobby sees it), and what peers dial: `port`, `public_ip` (when an endpoint was accepted) |
 | `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]`, optional `difficulty` (`normal`, `hard`, `infernal`, `ultimate`, `unknown`, or the raw game value; any other type is `bad_request`) | `room`, `me`, `appearances` (with `appearance` declared) |
 | `room.search` | `world`, `from` (1-based), `count` (<= 20), `flag_mask`, `flag_value`, `filters: [[id, op, value]]` (op 1 = 2 != 3 < 4 <= 5 > 6 >=); or `code` | `total`, `from`, `rooms`, `incompatible` (rooms of another protocol left out) |
 | `room.join` | `room` or `code`, `member_bin` | `room`, `me`, `appearances: [{member, appearance: {schema, data}}]` (the other members' looks, with `appearance` declared); `incompatible` with the room's `online_protocol` and its owner's `version`, `platform` |
@@ -652,14 +654,18 @@ never held for a seat in its grace period), `chat {room, member, account, name, 
 
 Rules the lobby enforces:
 - A member has two addresses. The observed one is that of its own connection: it never comes from the client, and it
-  alone decides who shares LAN candidates and every per-address limit. The advertised one, `public_ip`, is optional and
-  unverified, and is only ever a direct candidate for peers. It is honoured from a connection on IPv6, which peers cannot
-  reach, for a public IPv4 found by STUN or UPnP; anything else is ignored, so a client on IPv4 cannot point others
-  elsewhere. A `peer` event carries `public_ip` as `ip` when there is one, else the observed address.
+  alone decides who shares LAN candidates and every per-address limit. The advertised one, `endpoint`, is optional and
+  unverified, and is only ever a direct candidate for peers: the public IPv4 endpoint STUN or UPnP found, for a client
+  whose UDP leaves through another address than its lobby connection (IPv6, proxy, VPN, two links). It is taken whole or
+  not at all. A `peer` event carries its address and port, else the observed address with `port`: never the address of
+  one with the port of the other.
 - LAN candidates reach only members with the same observed address, whatever they advertise. Two members on different
   IPv6 addresses of one household do not get them: they use the public IPv4 or the relay.
-- Each new advertised endpoint costs a token of the observed address (8, then one per 30 s, IPv6 per /64); past that it
-  is ignored and the peers use the relay. Repeating an unchanged advertised endpoint sends peers nothing.
+- Each new advertised endpoint costs a token of the observed address (8, then one per 30 s, IPv6 per /64), of the account
+  (the same) and of the address it names (24, then one per 5 s, whoever names it); past any of them it is ignored and the
+  peers use the relay. Repeating an unchanged advertised endpoint sends peers nothing. It reaches only the other members
+  of the room (at most three), who each send a few dozen small datagrams there while they connect, never game traffic
+  before that endpoint has answered with the room's key. Ports below 1024 are refused: those are services, not games.
 - Seat grace: when a greeted socket in a room closes, its seat is kept 30 s and room events for it are held (<= 32;
   more ends the seat at once). `room.resume` on a new socket of the same account retakes it and receives the held
   events after the answer, then the current endpoint of every other member, including one who joined meanwhile. The
@@ -819,16 +825,24 @@ process ended or its network failed.
 
 ## NAT traversal
 
-- STUN (RFC 5389 Binding) from the game's own socket: the mapped port is what peers will hit.
-- The endpoint reported to the lobby: the local port when the lobby sees a loopback, private, IPv6 unique-local or
-  link-local address; else the UPnP mapping when the router's WAN address is the public IPv4 address; else the STUN port;
-  else the local port. A global IPv6 lobby address is not a LAN: the client waits for STUN and UPnP like any other, and
-  reports the public IPv4 they found in `public_ip`. With neither, it reports the local port and peers fall back to the
-  relay.
+- STUN (RFC 5389 Binding) from the game's own socket: the mapped endpoint is what peers will hit. The first answer is
+  used at once; a second server then confirms it ("sees the same endpoint") or shows a NAT that maps each destination
+  apart, for which direct is not guaranteed. The first server is asked again every 25 s, which keeps the mapping open for
+  players who join later; a new answer is reported again.
+- The endpoint reported to the lobby is always one source's, address and port together. The lobby connection and the
+  game's UDP may leave through different public addresses (a system proxy applies only to the former), so the address
+  the lobby sees is never combined with a port STUN or UPnP found. In order: the local port when the lobby sees a
+  loopback, private, IPv6 unique-local or link-local address; the UPnP mapping when its address is the STUN one, when STUN
+  has none, or when STUN's changes with the destination; the STUN endpoint; the address the lobby sees with the local
+  port, a guess; nothing, and the relay alone.
+- An endpoint on another address than the observed one is sent only to a lobby that says `udp_endpoint` (or, over IPv6, as
+  `public_ip`). An older lobby gets the observed address with the local port, and the relay does the rest.
+- The report waits up to 5 s for STUN and UPnP; when the paths differ and two STUN servers agree, it does not wait for
+  UPnP. Members that end up with the same address and port keep apart: the game then gets `127.82.76.89` and the member.
 - LAN candidates (the loopback address and the PC's private addresses, local port) are sent too; peers behind the same
   public address try them first, so two PCs on one router, and two instances on one PC, connect without hairpinning.
-- Punching: on every `peer` event a few PUNCH datagrams go to the peer's candidates, and both ends then send HELLOs
-  at the same time.
+- Punching: on every `peer` event, and when the socket is bound after one, a few PUNCH datagrams go to the peer's
+  candidates, and both ends then send HELLOs at the same time.
 - UPnP: SSDP discovery, WANIPConnection/WANPPPConnection `AddPortMapping` (UDP, lease 1 h renewed at half life, the next
   four ports on conflict, permanent lease if the router wants one), removed when the socket closes. LAN routers only.
 - Two symmetric NATs cannot be punched; such a pair uses the relay (below). Peer traffic is IPv4; a client with no public
@@ -846,6 +860,7 @@ lives below the game's Matching2 and Rudp entry points, in `net::PeerSocket`.
   behaves exactly as before: direct only, with the same 15 s timeout.
 - Per peer, not per room: a link tries the peer's direct candidates alone for 2.5 s (`Options::relay_after_ms`). If it
   is still not authenticated, the relay is offered beside them: the same authenticated HELLOs also go through the lobby.
+  A new endpoint that arrives in that time gets its own 2.5 s.
   Direct is not cancelled; the first HELLO or HELLO_ACK that authenticates fixes the path of that link
   (`LinkPath`: `kConnectingDirect`, `kRelayOffered`, `kDirect`, `kRelay`, `kFailed`). A link that came up on the relay
   stays on it for the session; one that came up directly uses it only when its quality fails (Peer transport, "Relay
@@ -965,7 +980,8 @@ production lobby is never contacted.
 `dcp-online-hle-tests` calls the Matching2, libSceNet and Rudp entry points as the game does while a second player
 joins through the lobby and connects over UDP. With `--endpoint-scenario <address>` it runs the path a public lobby takes:
 the lobby treats it as coming from that address and a loopback stand-in answers STUN, and the test checks what a peer is
-told. `tools\test.ps1` runs it for a global IPv6 and a public IPv4 address and also checks the log lines. It needs a
+told. `tools\test.ps1` runs it for a global IPv6 and a public IPv4 address, and for a UDP path that is not the lobby
+connection's (a second address after the first), and also checks the log lines. It needs a
 development lobby started with `--test-observed-address` (`/?observed=<address>` from loopback; the Worker has no such
 input) and reports SKIPPED otherwise. Every socket in these tests is bound to loopback: they need no firewall rule and
 never send anything to the public addresses they report.
@@ -995,7 +1011,7 @@ exchange of endpoints, P2P/Rudp and gameplay. It does not check NAT traversal: b
 they connect through their LAN candidates. That needs two PCs on unrelated Internet connections, both on the
 production service with nothing to set up:
 
-1. Both Connection tests say "Ready for online play".
+1. Both Connection tests start with "Ready for online play".
 2. Exchange friend codes and become friends.
 3. A hosts a room; B uses Join Friends Room.
 4. Both logs show the P2P link and the Rudp contexts connected (lines below), with an address that is not a LAN one.

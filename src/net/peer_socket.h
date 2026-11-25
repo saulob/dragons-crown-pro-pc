@@ -32,23 +32,56 @@ enum class LinkPath { kConnectingDirect, kRelayOffered, kDirect, kRelay, kFailed
 inline constexpr uint32_t kRelayAddress = 0x7F524C59;
 inline Endpoint relay_endpoint(uint16_t member) { return {kRelayAddress, member}; }
 inline bool is_relay_endpoint(const Endpoint& e) { return e.ip == kRelayAddress; }
-// What the game is told about a room member: its public endpoint, or the relay's for that member when it has none.
-inline Endpoint signaling_endpoint(const Endpoint& address, uint16_t member) {
-    return address.valid() ? address : relay_endpoint(member);
+// What the game is told about a room member: its public endpoint, or the relay's for that member when it has none or
+// another member has the same one.
+inline Endpoint signaling_endpoint(const Endpoint& address, uint16_t member, bool shared = false) {
+    return address.valid() && !shared ? address : relay_endpoint(member);
 }
 
+// What independent STUN servers say about the socket's NAT mapping.
+enum class NatMapping { kUnknown, kOneServer, kSame, kPerDestination };
+struct StunView {
+    StunState state = StunState::kIdle;
+    Endpoint mapped;
+    NatMapping mapping = NatMapping::kUnknown;
+};
+
+struct EndpointFacts {
+    uint32_t lobby_ip = 0; // 0 when the lobby does not see an IPv4 address
+    bool lobby_on_lan = false;
+    bool lobby_takes_endpoint = false; // the lobby shares an endpoint on another address than the one it observes
+    uint16_t local_port = 0;
+    StunView stun;
+    Endpoint upnp; // invalid without a mapping
+};
+
 enum class EndpointSource { kLan, kUpnp, kStun, kLobby, kRelayFallback };
-// What goes to the lobby: `ip` is the IPv4 address peers will reach, 0 when there is none (peers then use the relay).
+// `at` is one source's endpoint as that source gave it; its ip is 0 when peers have nothing to dial but the relay.
 struct EndpointChoice {
     EndpointSource source = EndpointSource::kLobby;
-    uint16_t port = 0;
-    uint32_t ip = 0;
+    Endpoint at;
 
     bool operator==(const EndpointChoice&) const = default;
 };
-// `lobby_ip` is 0 when the lobby does not see an IPv4 address, `upnp` is invalid without a mapping.
-EndpointChoice choose_endpoint(uint32_t lobby_ip, bool lobby_on_lan, uint16_t local_port, StunState stun, const Endpoint& mapped,
-                               const Endpoint& upnp);
+EndpointChoice choose_endpoint(const EndpointFacts& facts);
+
+// The `udp` request: `port` goes with the address the lobby observes, and another address travels whole in `endpoint`.
+// An older lobby reached over IPv6 takes it as `public_ip` with `port`.
+struct EndpointReport {
+    uint16_t port = 0;
+    uint32_t public_ip = 0;
+    Endpoint endpoint;
+
+    bool operator==(const EndpointReport&) const = default;
+};
+EndpointReport endpoint_report(const EndpointChoice& choice, const EndpointFacts& facts);
+
+// The lobby connection and the game's UDP leave through different public IPv4 addresses (proxy, VPN, two links).
+bool paths_differ(const EndpointFacts& facts);
+// Nothing still running is worth delaying the report for. A router mapping comes later when the paths differ: without the
+// report peers have nothing that could work.
+bool endpoint_settled(const EndpointFacts& facts, bool upnp_working);
+std::string endpoint_facts_text(const EndpointFacts& facts, const std::string& observed_ip);
 std::string endpoint_choice_text(const EndpointChoice& choice, bool relay_available);
 // What peers dial, with the lobby's own view beside it when the two differ.
 std::string lobby_endpoint_text(const std::string& public_ip, const std::string& observed_ip);
@@ -108,6 +141,7 @@ public:
         int connect_timeout_ms = 15000;
         int idle_timeout_ms = 10000;
         int relay_after_ms = 2500; // direct-only head start; the direct candidates keep being tried after it
+        int stun_refresh_ms = 25000; // keeps the NAT mapping open for players who join later, and notices a new one
         // Tests only: datagrams go here instead of to a UDP socket, and nothing runs on its own; the caller drives the
         // clock with the simulated_* calls.
         std::function<void(const Endpoint& to, const uint8_t* data, size_t size)> simulated_network;
@@ -166,7 +200,7 @@ public:
     bool send_comms(uint64_t account, const uint8_t* body, size_t size);
     std::vector<CommsPacket> take_comms();
 
-    StunState stun(Endpoint* mapped) const;
+    StunView stun() const;
     // Opens our NAT towards an endpoint before the handshake (throwaway datagrams).
     void punch(const Endpoint& to);
     // Advances on every pass of the socket's own loop: proof that this end keeps servicing its links.
@@ -215,7 +249,7 @@ private:
         Endpoint addr;
         LinkState state = LinkState::kConnecting;
         bool wanted = false; // the game asked for it (connect()); a peer's handshake alone does not count
-        uint64_t started_ms = 0, last_rx_ms = 0, last_tx_ms = 0, next_hello_ms = 0, addr_rx_ms = 0;
+        uint64_t started_ms = 0, direct_ms = 0, last_rx_ms = 0, last_tx_ms = 0, next_hello_ms = 0, addr_rx_ms = 0;
         bool relay_offered = false;
         std::string closed_why;
         // sending
@@ -276,6 +310,9 @@ private:
     void Close(Link& link, LinkEnd end, const std::string& why, bool tell_peer, uint8_t code = 0);
     uint64_t Now() const;
     void StunStep(uint64_t now);
+    void StunAnswer(const Endpoint& mapped, const Endpoint& from, uint64_t now);
+    void AskStun(const Endpoint& server, bool new_request);
+    void NextStunServer();
     Link* Find(int id);
     const Link* Find(int id) const;
     Link* ByTag(uint32_t tag);
@@ -305,8 +342,9 @@ private:
     std::deque<CommsPacket> comms_inbox_;
     int next_link_ = 1;
     // STUN
-    StunState stun_state_ = StunState::kIdle;
-    Endpoint stun_mapped_;
+    StunView stun_;
+    bool stun_confirming_ = false;
+    Endpoint stun_server_, stun_asked_; // the one that gave `stun_.mapped`, the one whose answer is awaited
     std::vector<Endpoint> stun_addresses_;
     std::thread stun_resolver_;
     bool stun_resolved_ = false;

@@ -11691,8 +11691,10 @@ void TestTextWithValues() {
     const auto translated = [](net::ConnectionFacts facts) {
         for (const uint16_t port : {uint16_t(0), uint16_t(3658)}) {
             facts.udp_port = port;
+            const std::string verdict = net::summarize_connection(facts).verdict;
+            CHECK(std::string(Tr(verdict)) != verdict);
             for (const net::ConnectionReport::Line& line : net::summarize_connection(facts).lines) {
-                CHECK(std::string(Tr(line.label)) != line.label || line.label == "Relay");
+                CHECK(std::string(Tr(line.label)) != line.label);
                 CHECK(TrValue(line.text) != line.text);
             }
         }
@@ -11715,6 +11717,12 @@ void TestTextWithValues() {
         translated(facts);
         facts.relay_ok = true;
         translated(facts);
+        facts.other_path = true;
+        translated(facts);
+        facts.endpoint_shared = false;
+        translated(facts);
+        facts.other_path = false;
+        facts.endpoint_shared = true;
         facts.stun_off = true;
         translated(facts);
         facts.port_open = false;
@@ -11832,6 +11840,13 @@ int main(int argc, char** argv) {
         TestPtBrEditorText();
         std::printf("%d checks, %d failed\n", g_checks, g_failures);
         std::printf("GROUP|launcher-ptbr-editor|%s\n", g_failures == 0 ? "PASS" : "FAIL");
+        return g_failures ? 1 : 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "connection-test") {
+        TestLauncherLocalization();
+        TestTextWithValues();
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        std::printf("GROUP|launcher-connection-test|%s\n", g_failures == 0 ? "PASS" : "FAIL");
         return g_failures ? 1 : 0;
     }
     if (argc == 2 && std::string(argv[1]) == "localization") {

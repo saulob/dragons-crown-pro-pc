@@ -45,11 +45,11 @@
   saves) and the quick groups of dcp-save-editor-tests, and reports their result alone. No game, no window.
   The normal run includes both.
 .DESCRIPTION
-  The default run is the current focus, G8K2W (the launcher opens without Vulkan): the launcher renderer fallback, the Vulkan probe
-  and the graphics card list on scripted systems (dcp-launcher-startup-tests), the launcher renderer and startup source
-  groups and the headless command interface (dcp-launcher-tests renderer, startup, headless), the game renderer settings
-  (dcp-renderer-selection-tests) and, through WSL, the syntax of the shared launcher sources plus the startup logic compiled
-  and run with g++. Every other group stays under -Full.
+  The default run is the current focus, N7Q4L (issue #75, direct P2P endpoint): address classification, endpoint selection, the
+  STUN mapping, the Connection test, the direct and relay transport and its failure paths (dcp-net-tests), the Matching2 and
+  Rudp entry points and the endpoint paths a public lobby takes (dcp-online-hle-tests), the Connection test in the launcher
+  and the Options menu, the Worker tests of endpoints, their abuse limits, resumes and the relay and, through WSL, the same
+  net test groups on Linux. Every other group stays under -Full.
 
   Needs the build configured once by tools\build.ps1. The dependencies in gpu\deps.txt are refreshed as in build.ps1 when
   their pin or patches changed. The tests are not part of the default build; only the focused test targets are built,
@@ -255,10 +255,11 @@ function Start-DevLobby {
     return $lobby
 }
 
-function Invoke-WorkerTests {
+function Invoke-WorkerTests([string[]]$Suites = @('*')) {
     $node = Get-Node
     if (-not $node) { return Skipped 'Node.js 22.13 or later was not found' }
-    Invoke-Native $node @('--no-warnings', '--test', '--test-reporter=tap', 'test/*.test.js') $true (Join-Path $script:RepoRoot 'server\lobby')
+    $files = @($Suites | ForEach-Object { "test/$_.test.js" })
+    Invoke-Native $node (@('--no-warnings', '--test', '--test-reporter=tap') + $files) $true (Join-Path $script:RepoRoot 'server\lobby')
 }
 
 function Find-LinuxDistro {
@@ -286,10 +287,10 @@ function Get-LinuxTarget {
     return $target
 }
 
-function Get-LinuxScriptCommand([string]$Script) {
+function Get-LinuxScriptCommand([string]$Script, [string[]]$Options = @()) {
     $target = Get-LinuxTarget
     if ($target.Skip) { return Skipped $target.Skip }
-    [pscustomobject]@{ Skip = ''; File = 'wsl.exe'; Arguments = @('-d', $target.Distro, '--exec', 'bash', "$($target.Root)/tools/$Script", $target.Root) }
+    [pscustomobject]@{ Skip = ''; File = 'wsl.exe'; Arguments = @('-d', $target.Distro, '--exec', 'bash', "$($target.Root)/tools/$Script", $target.Root) + $Options }
 }
 
 function Get-LinuxBuildCommand([string]$Option) {
@@ -472,18 +473,24 @@ $tests = @(
         -Key 'endpoint path IPv4' -Arguments @('--endpoint-scenario', '203.0.113.9') `
         -Requires @('reporting public STUN endpoint 203.0.113.9:41001', 'lobby has 203.0.113.9:41001') `
         -Forbids @('reporting LAN endpoint', 'LAN lobby', 'lobby has observed')),
+    (Test-Step 'online endpoint path, lobby connection through a proxy (issue #75: UDP on another public IPv4, late and early STUN, what peers receive)' 'dcp-online-hle-tests' -Capture -Quiet -Lobby -Timing `
+        -Key 'endpoint path issue 75' -Arguments @('--endpoint-scenario', '203.0.113.12', '198.51.100.11') `
+        -Requires @('reporting lobby-observed address with the local port 203.0.113.12:', 'the lobby connection and UDP use different public addresses',
+                    'reporting public STUN endpoint 198.51.100.11:59547', 'lobby has observed 203.0.113.12, public 198.51.100.11:59547') `
+        -Forbids @('reporting LAN endpoint', 'LAN lobby', '203.0.113.12:59547', '203.0.113.12:41000')),
     (Test-Step 'Windows log tests (closed standard streams)' 'dcp-log-tests')
 )
 
-$defaultFocusName = 'G8K2W launcher without Vulkan'
-$defaultFocusSuites = @('dcp-launcher-startup-tests', 'dcp-launcher-tests', 'dcp-renderer-selection-tests')
+$defaultFocusName = 'N7Q4L direct P2P endpoint, issue #75'
+$defaultFocusSuites = @('dcp-net-tests', 'dcp-online-hle-tests', 'dcp-options-menu-tests', 'dcp-launcher-tests')
+$focusNetGroups = @('foundations', 'address-classification', 'endpoint-selection', 'stun-mapping', 'connection-test', 'direct', 'relay-codec', 'relay-fallback',
+                    'failure-paths', 'transport-quality', 'protocol', 'lobby-binary')
+$focusEndpointPaths = @('endpoint path IPv6', 'endpoint path IPv4', 'endpoint path issue 75')
 # The result line each focused selector must print: a selector that finds nothing to check (or prints nothing) is a failure.
 $defaultFocusGroups = [ordered]@{
-    'dcp-launcher-startup-tests'     = @('GROUP|launcher-startup-logic|PASS')
-    'dcp-launcher-tests startup'     = @('GROUP|launcher-startup|PASS')
-    'dcp-launcher-tests renderer'    = @('GROUP|launcher-renderer|PASS')
-    'dcp-launcher-tests headless'    = @('GROUP|launcher-headless-cli|PASS')
-    'dcp-renderer-selection-tests'   = @('renderer selection tests:')
+    'dcp-net-tests online'               = @($focusNetGroups | Where-Object { $_ -ne 'lobby-binary' } | ForEach-Object { "GROUP|$_|PASS" })
+    'dcp-launcher-tests connection-test' = @('GROUP|launcher-connection-test|PASS')
+    'Worker tests (endpoints)'           = @('# fail 0')
 }
 $useDefaultFocus = -not ($Full -or $BossBattleOnline -or $EarlyStorySession -or $LauncherRenderer -or $HeadlessCli -or $EditorTranslation -or $EditorRelease -or $SavePage -or $InventoryEditor)
 $bossBattleOnlineSuites = 'dcp-boss-battle-visitor-lifecycle-tests', 'dcp-boss-battle-handoff-tests', 'dcp-boss-battle-early-story-handoff-tests', 'dcp-boss-battle-online-tests', 'dcp-boss-battle-tests',
@@ -548,16 +555,17 @@ if ($BossBattleOnline) {
     Sync-GpuDependencies
 } else {
     $tests = @(
-        (Test-Step 'launcher startup logic (renderer fallback and recovery option, Vulkan probe scenarios, graphics card list; scripted systems, no window)' 'dcp-launcher-startup-tests' -Capture -Quiet),
-        (Test-Step 'launcher startup wiring (Vulkan after the window, probe never asserts, launcher failure starts nothing, CLI option, diagnostics, game renderer settings)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests startup' -Arguments @('startup')),
-        (Test-Step 'launcher renderer (Direct3D 11 with the issue #45 pins, software fallback, first frame, teardown, present stall telemetry, frame cap)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests renderer' -Arguments @('renderer')),
-        (Test-Step 'headless command interface (--install, --check-game, skipped-launcher patches)' 'dcp-launcher-tests' -Capture -Quiet `
-            -Key 'dcp-launcher-tests headless' -Arguments @('headless')),
-        (Test-Step 'game renderer selection (Vulkan, Auto, OpenGL, Direct3D 11 values and policy)' 'dcp-renderer-selection-tests' -Capture),
-        (Test-Step 'Linux launcher syntax and startup logic (WSL: g++ -fsyntax-only on the shared launcher sources and the Editor tests, then the startup logic compiled and run; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-launcher.sh' } `
-            -Key 'Linux launcher syntax (WSL)' -Nominal 30)
+        (Test-Step 'online tests (endpoint selection, STUN mapping, Connection test, P2P transport, relay fallback, failure paths; binary WebSocket against a loopback lobby)' 'dcp-net-tests' -Capture -Quiet -Lobby -Timing `
+            -Key 'dcp-net-tests online' -Arguments $focusNetGroups)
+        ($tests | Where-Object { $_.Exe -eq 'dcp-online-hle-tests' -and -not $_.Key })
+        ($tests | Where-Object { $focusEndpointPaths -contains $_.Key })
+        (Test-Step 'Connection test in the Options menu (report lines, verdicts, Portuguese text)' 'dcp-options-menu-tests')
+        (Test-Step 'Connection test in the launcher (every line and verdict translated)' 'dcp-launcher-tests' -Capture -Quiet `
+            -Key 'dcp-launcher-tests connection-test' -Arguments @('connection-test'))
+        (Test-Step 'Worker tests (node --test: lobby protocol and endpoints, abuse limits, resume, relay, write budget, compatibility)' `
+            -Block { Invoke-WorkerTests @('lobby', 'abuse', 'resume', 'relay', 'write_budget', 'compatibility', 'persistence', 'worker') } -Key 'Worker tests (endpoints)')
+        (Test-Step 'Linux network tests (WSL: POSIX sockets, the same net test groups; skipped without WSL)' -Command { Get-LinuxScriptCommand 'test-linux-net.sh' $focusNetGroups } `
+            -Key 'Linux network tests (WSL)' -Nominal 120)
     )
     $requiredSuites = $defaultFocusSuites
 }
@@ -902,7 +910,7 @@ function Read-Groups([string[]]$Lines) {
     return $table
 }
 $net = Read-Groups $captured['dcp-net-tests']
-$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'transport-quality', 'session-watch', 'early-story-session', 'protocol', 'linux-parity', 'lobby-binary'
+$netGroups = 'foundations', 'address-classification', 'endpoint-selection', 'stun-mapping', 'connection-test', 'direct', 'relay-codec', 'relay-fallback', 'failure-paths', 'transport-quality', 'session-watch', 'early-story-session', 'protocol', 'linux-parity', 'lobby-binary'
 if ($captured.ContainsKey('dcp-net-tests')) {
     foreach ($group in $netGroups | Where-Object { -not $net.ContainsKey($_) }) { $net[$group] = 'FAIL' }
 }
@@ -982,11 +990,12 @@ $summary = [ordered]@{
     'Early Story transition/session regression (DCP-7G8RZV)' = Group-Status $net @('early-story-session')
     'Connection test' = Group-Status $net @('connection-test')
     'Address classification' = Group-Status $net @('address-classification')
-    'Endpoint selection' = Group-Status $net @('endpoint-selection')
+    'Endpoint selection' = Group-Status $net @('endpoint-selection', 'stun-mapping')
     'Endpoint path, global IPv6' = Endpoint-Path 'endpoint path IPv6' 'the lobby did not take the observed address'
     'Endpoint path, public IPv4' = Endpoint-Path 'endpoint path IPv4' 'the lobby did not take the observed address'
-    'Worker address security' = Worker-Coverage '(advertised endpoint: |LAN candidates: |old clients: |an advertised IPv4 is never|a claimed observed address)' 11
-    'Public endpoint budget' = Worker-Coverage '(advertised endpoints spend|repeating an advertised|flipping the LAN list|clients that advertise nothing|repeating an unchanged room or endpoint)' 5
+    'Endpoint path, issue #75' = Endpoint-Path 'endpoint path issue 75' 'the lobby did not take the observed address'
+    'Worker address security' = Worker-Coverage '(advertised endpoint: |LAN candidates: |old clients: |an advertised IPv4 is never|a claimed observed address)' 19
+    'Public endpoint budget' = Worker-Coverage '(advertised endpoints spend|repeating an advertised|flipping the LAN list|clients that advertise nothing|repeating an unchanged room or endpoint|udp endpoint budget: )' 12
     'Windows parity' = $windows
     'Online HLE' = $hle
     'Linux net tests (WSL)' = $linuxSummary

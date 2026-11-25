@@ -24,6 +24,8 @@ struct ConnectionFacts {
     bool second_answer = false;   // a second STUN server answered
     bool same_mapping = false;    // and saw the same public port
     Router router = Router::kNone;
+    bool other_path = false;      // the online service sees another public address than STUN does
+    bool endpoint_shared = true;  // what players would be given to dial came from UDP, not from the online service
 };
 
 struct ConnectionReport {

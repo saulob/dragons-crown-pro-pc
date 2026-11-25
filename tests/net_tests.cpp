@@ -79,11 +79,11 @@ void SetEnv(const char* name, const char* value) {
 #endif
 }
 
-// `dcp-net-tests <group>` runs that group alone (the transport simulator needs no sockets).
-const char* g_only = nullptr;
+// `dcp-net-tests <group>...` runs those groups alone (the transport simulator needs no sockets).
+std::vector<std::string> g_only;
 
 void Group(const char* name, const std::function<void()>& run) {
-    if (g_only && std::strcmp(g_only, name) != 0) return;
+    if (!g_only.empty() && std::find(g_only.begin(), g_only.end(), name) == g_only.end()) return;
     const int before = g_failures;
     run();
     std::printf("GROUP|%s|%s\n", name, g_failures == before ? "PASS" : "FAIL");
@@ -327,24 +327,24 @@ void TestConnectionSummary() {
     relayed.udp_ok = relayed.second_answer = relayed.same_mapping = false;
     relayed.relay_ok = true;
     const ConnectionReport relay_report = summarize_connection(relayed);
-    CHECK(relay_report.ready && relay_report.verdict == "Ready for online play");
-    CHECK(mark_of(relay_report, "Direct connections") == Mark::kNote && mark_of(relay_report, "Relay") == Mark::kOk);
-    CHECK(text_of(relay_report, "Relay") ==
+    CHECK(relay_report.ready && relay_report.verdict == "Ready for online play through the relay");
+    CHECK(mark_of(relay_report, "Direct connections") == Mark::kNote && mark_of(relay_report, "Relay fallback") == Mark::kOk);
+    CHECK(text_of(relay_report, "Relay fallback") ==
           "Available. A match that cannot connect directly connects through the online service");
     CHECK(logged(relay_report, "relay: advertised by the online service"));
     ConnectionFacts relay_and_direct = cone;
     relay_and_direct.udp_port = 3658;
     relay_and_direct.relay_ok = true;
     const ConnectionReport both = summarize_connection(relay_and_direct);
-    CHECK(labels(both) == (std::vector<std::string>{"Online service", "Direct connections", "Relay"}));
+    CHECK(labels(both) == (std::vector<std::string>{"Online service", "Direct connections", "Relay fallback"}));
     CHECK(mark_of(both, "Direct connections") == Mark::kOk);
     ConnectionFacts relay_port_taken = relayed;
     relay_port_taken.port_open = false;
     const ConnectionReport no_port = summarize_connection(relay_port_taken);
-    CHECK(!no_port.ready && text_of(no_port, "Relay").empty() && logged(no_port, "relay: needs the UDP port"));
+    CHECK(!no_port.ready && text_of(no_port, "Relay fallback").empty() && logged(no_port, "relay: needs the UDP port"));
     ConnectionFacts relay_service_down = relayed;
     relay_service_down.lobby_ok = false;
-    CHECK(!summarize_connection(relay_service_down).ready && text_of(summarize_connection(relay_service_down), "Relay").empty());
+    CHECK(!summarize_connection(relay_service_down).ready && text_of(summarize_connection(relay_service_down), "Relay fallback").empty());
     on_port.udp_ok = on_port.second_answer = on_port.same_mapping = false;
     CHECK(text_of(summarize_connection(on_port), "Direct connections") ==
           "May be blocked by your network or firewall on UDP port 3658.");
@@ -359,6 +359,34 @@ void TestConnectionSummary() {
           text_of(taken_report, "Direct connections") ==
               "Cannot open UDP port 3658. Another program may already be using it, or network security may be blocking it.");
     CHECK(labels(taken_report) == (std::vector<std::string>{"Online service", "Direct connections"}));
+
+    // Issue #75: through a proxy or VPN, ready says nothing about the path, and it is no symmetric NAT.
+    ConnectionFacts other_path = cone;
+    other_path.udp_port = 3658;
+    other_path.relay_ok = true;
+    other_path.router = Router::kMappedBehindNat;
+    other_path.other_path = true;
+    const ConnectionReport other_report = summarize_connection(other_path);
+    CHECK(other_report.ready && other_report.verdict == "Ready for online play; direct depends on your network");
+    CHECK(mark_of(other_report, "Direct connections") == Mark::kNote && mark_of(other_report, "Relay fallback") == Mark::kOk);
+    CHECK(text_of(other_report, "Direct connections").find("different public addresses") != std::string::npos);
+    CHECK(!logged(other_report, "symmetric NAT"));
+    other_path.endpoint_shared = false;
+    const ConnectionReport unshared = summarize_connection(other_path);
+    CHECK(unshared.ready && unshared.verdict == "Ready for online play through the relay");
+    CHECK(text_of(unshared, "Direct connections").find("Unlikely: ") == 0 && mark_of(unshared, "Direct connections") == Mark::kNote);
+    CHECK(labels(unshared) == (std::vector<std::string>{"Online service", "Direct connections", "Relay fallback"}));
+    other_path.relay_ok = false;
+    const ConnectionReport stuck = summarize_connection(other_path);
+    CHECK(!stuck.ready && stuck.verdict == "Limited: some players may not be able to connect to you");
+    for (const ConnectionReport* r : {&other_report, &unshared, &stuck}) {
+        for (const auto& line : r->lines) CHECK(line.text.size() < 160); // RuntimeOnlineTestLine::text
+        CHECK(r->verdict.size() < 60);
+    }
+    ConnectionFacts symmetric_relay = cone;
+    symmetric_relay.same_mapping = false;
+    symmetric_relay.relay_ok = true;
+    CHECK(summarize_connection(symmetric_relay).verdict == "Ready for online play through the relay");
 
     OnlineConfig config;
     CHECK(connection_test_port(config) == kGameUdpPort && kGameUdpPort == 3658);
@@ -522,69 +550,248 @@ void TestEndpointChoice() {
     const Endpoint none;
     const Endpoint stun_public{parse_ip("198.51.100.25"), 41000};
     const Endpoint upnp_public{parse_ip("198.51.100.25"), 42000};
-    const auto lobby_lan = [](const char* ip) { return is_lan(classify_text(ip)); };
-    const auto ipv4 = [&](const Endpoint& mapped, StunState stun, const Endpoint& upnp = {}) {
-        return choose_endpoint(parse_ip("203.0.113.9"), lobby_lan("203.0.113.9"), local, stun, mapped, upnp);
+    const char* seen_v4 = "203.0.113.9";
+    const char* seen_v6 = "2001:db8:3f01:600:f582:ba04:1749:7051";
+    const uint32_t seen = parse_ip(seen_v4);
+    const auto facts = [&](const char* observed, bool takes, const Endpoint& mapped, StunState state = StunState::kDone,
+                           const Endpoint& upnp = {}, NatMapping mapping = NatMapping::kSame) {
+        EndpointFacts f;
+        f.lobby_ip = parse_ip(observed);
+        f.lobby_on_lan = is_lan(classify_text(observed));
+        f.lobby_takes_endpoint = takes;
+        f.local_port = local;
+        f.stun = {state, mapped, state == StunState::kDone ? mapping : NatMapping::kUnknown};
+        f.upnp = upnp;
+        return f;
     };
-    const auto ipv6 = [&](const Endpoint& mapped, StunState stun, const Endpoint& upnp = {}) {
-        const char* seen = "2001:db8:3f01:600:f582:ba04:1749:7051";
-        return choose_endpoint(parse_ip(seen), lobby_lan(seen), local, stun, mapped, upnp);
+    const EndpointChoice relay{EndpointSource::kRelayFallback, {0, local}};
+    const EndpointChoice lobby_v4{EndpointSource::kLobby, {seen, local}};
+
+    for (const bool takes : {false, true}) {
+        // Lobby and STUN on the same public IPv4.
+        const Endpoint same{seen, 41000}, upnp_same{seen, 42000};
+        CHECK((choose_endpoint(facts(seen_v4, takes, same)) == EndpointChoice{EndpointSource::kStun, same}));
+        CHECK((choose_endpoint(facts(seen_v4, takes, same, StunState::kDone, upnp_same)) == EndpointChoice{EndpointSource::kUpnp, upnp_same}));
+        CHECK((choose_endpoint(facts(seen_v4, takes, same, StunState::kDone, same)) == EndpointChoice{EndpointSource::kUpnp, same}));
+        CHECK((endpoint_report(choose_endpoint(facts(seen_v4, takes, same)), facts(seen_v4, takes, same)) == EndpointReport{41000, 0, {}}));
+        CHECK(choose_endpoint(facts(seen_v4, takes, none, StunState::kFailed)) == lobby_v4);
+        CHECK(choose_endpoint(facts(seen_v4, takes, none, StunState::kRunning)) == lobby_v4);
+        CHECK((choose_endpoint(facts(seen_v4, takes, none, StunState::kFailed, upnp_same)) == EndpointChoice{EndpointSource::kUpnp, upnp_same}));
+        // Double NAT and carrier-grade NAT: the router's own address is no endpoint.
+        for (const char* inner : {"192.168.1.1", "100.64.0.13"}) {
+            CHECK((choose_endpoint(facts(seen_v4, takes, same, StunState::kDone, {parse_ip(inner), 3658})) == EndpointChoice{EndpointSource::kStun, same}));
+            CHECK(choose_endpoint(facts(seen_v4, takes, none, StunState::kFailed, {parse_ip(inner), 3658})) == lobby_v4);
+            CHECK(choose_endpoint(facts(seen_v6, takes, none, StunState::kFailed, {parse_ip(inner), 3658})) == relay);
+        }
+        // A lobby on the LAN or a virtual LAN.
+        for (const char* lan : {"192.168.1.20", "10.1.2.3", "169.254.0.1", "127.0.0.1", "172.19.163.2"}) {
+            const EndpointFacts f = facts(lan, takes, stun_public, StunState::kDone, upnp_public);
+            CHECK((choose_endpoint(f) == EndpointChoice{EndpointSource::kLan, {parse_ip(lan), local}}));
+            CHECK((endpoint_report(choose_endpoint(f), f) == EndpointReport{local, 0, {}}));
+            CHECK(!paths_differ(f));
+        }
+        for (const char* lan : {"fd12:3456::1", "fe80::1", "::1"}) {
+            CHECK((choose_endpoint(facts(lan, takes, stun_public)) == EndpointChoice{EndpointSource::kLan, {0, local}}));
+        }
+        // IPv6 to the lobby.
+        const EndpointFacts v6 = facts(seen_v6, takes, stun_public);
+        CHECK((choose_endpoint(v6) == EndpointChoice{EndpointSource::kStun, stun_public}));
+        CHECK((endpoint_report(choose_endpoint(v6), v6) ==
+               (takes ? EndpointReport{local, 0, stun_public} : EndpointReport{41000, stun_public.ip, {}})));
+        CHECK((choose_endpoint(facts(seen_v6, takes, stun_public, StunState::kDone, upnp_public)) == EndpointChoice{EndpointSource::kUpnp, upnp_public}));
+        CHECK((choose_endpoint(facts(seen_v6, takes, none, StunState::kFailed, upnp_public)) == EndpointChoice{EndpointSource::kUpnp, upnp_public}));
+        const Endpoint upnp_elsewhere{parse_ip("192.0.2.77"), 42000};
+        CHECK((choose_endpoint(facts(seen_v6, takes, stun_public, StunState::kDone, upnp_elsewhere)) == EndpointChoice{EndpointSource::kStun, stun_public}));
+        CHECK(choose_endpoint(facts(seen_v6, takes, none, StunState::kFailed)) == relay);
+        CHECK(choose_endpoint(facts(seen_v6, takes, none, StunState::kRunning)) == relay);
+        CHECK(choose_endpoint(facts(seen_v6, takes, {parse_ip("192.168.1.20"), 41000})) == relay);
+        CHECK(choose_endpoint(facts(seen_v6, takes, {parse_ip("100.64.0.13"), 41000})) == relay);
+        CHECK((endpoint_report(relay, v6) == EndpointReport{local, 0, {}}));
+        CHECK(choose_endpoint(facts("", takes, stun_public)).source == EndpointSource::kStun);
+        CHECK(choose_endpoint(facts("", takes, none, StunState::kFailed)) == relay);
+        // A STUN result that arrives after the fallback report changes what must be reported, though not the port.
+        const EndpointFacts late = facts(seen_v6, takes, {stun_public.ip, local});
+        CHECK(endpoint_report(choose_endpoint(late), late) != endpoint_report(relay, late));
+    }
+
+    // Issue #75: the lobby connection goes through a proxy, UDP does not.
+    const Endpoint udp_exit{parse_ip("198.51.100.11"), 59547};
+    for (const char* proxy : {"203.0.113.12", "203.0.113.11", "198.51.100.21", "198.51.100.14"}) {
+        const Endpoint hybrid{parse_ip(proxy), udp_exit.port};
+        for (const NatMapping mapping : {NatMapping::kUnknown, NatMapping::kOneServer, NatMapping::kSame, NatMapping::kPerDestination}) {
+            const EndpointFacts current = facts(proxy, true, udp_exit, StunState::kDone, {}, mapping);
+            CHECK(paths_differ(current));
+            CHECK((choose_endpoint(current) == EndpointChoice{EndpointSource::kStun, udp_exit}));
+            CHECK((endpoint_report(choose_endpoint(current), current) == EndpointReport{local, 0, udp_exit}));
+            // A lobby that cannot share it gets a port that belongs to the address it observes.
+            const EndpointFacts old = facts(proxy, false, udp_exit, StunState::kDone, {}, mapping);
+            CHECK((choose_endpoint(old) == EndpointChoice{EndpointSource::kLobby, {hybrid.ip, local}}));
+            CHECK((endpoint_report(choose_endpoint(old), old) == EndpointReport{local, 0, {}}));
+            CHECK(choose_endpoint(current).at != hybrid && choose_endpoint(old).at != hybrid);
+        }
+    }
+
+    // Whatever is known, the choice is one source's endpoint and the report pairs its port with that source's address.
+    const uint32_t ips[] = {0, parse_ip("203.0.113.12"), parse_ip("198.51.100.11"), parse_ip("192.0.2.77")};
+    for (const bool takes : {false, true}) {
+        for (const uint32_t lobby : ips) {
+            for (const uint32_t stun : ips) {
+                for (const uint32_t router : ips) {
+                    for (const NatMapping mapping : {NatMapping::kOneServer, NatMapping::kSame, NatMapping::kPerDestination}) {
+                        EndpointFacts f;
+                        f.lobby_ip = lobby;
+                        f.lobby_takes_endpoint = takes;
+                        f.local_port = local;
+                        f.stun = {stun ? StunState::kDone : StunState::kFailed, {stun, uint16_t(stun ? 59547 : 0)}, mapping};
+                        f.upnp = {router, uint16_t(router ? 42000 : 0)};
+                        const EndpointChoice c = choose_endpoint(f);
+                        CHECK(c.at == f.stun.mapped || c.at == f.upnp || c.at == (Endpoint{lobby, local}));
+                        const EndpointReport r = endpoint_report(c, f);
+                        const Endpoint dialed = r.endpoint.valid() ? r.endpoint : Endpoint{r.public_ip ? r.public_ip : lobby, r.port};
+                        CHECK(dialed == c.at);
+                        const Endpoint refused{lobby, r.port}; // what an older or refusing lobby tells peers
+                        CHECK(r.public_ip || refused == (Endpoint{lobby, local}) || refused == f.stun.mapped || refused == f.upnp);
+                        CHECK(!r.public_ip || (!lobby && !takes));
+                        CHECK(!r.endpoint.valid() || takes);
+                    }
+                }
+            }
+        }
+    }
+
+    // The report waits for STUN and the router, but not for the router once a confirmed endpoint on another path is known.
+    const auto settled = [&](bool takes, const char* observed, StunState state, NatMapping mapping, bool upnp_working) {
+        return endpoint_settled(facts(observed, takes, udp_exit, state, {}, mapping), upnp_working);
     };
-
-    // IPv4 users keep the address the lobby sees, whatever STUN says.
-    const uint32_t seen = parse_ip("203.0.113.9");
-    CHECK((ipv4(stun_public, StunState::kDone) == EndpointChoice{EndpointSource::kStun, 41000, seen}));
-    CHECK((ipv4(none, StunState::kFailed) == EndpointChoice{EndpointSource::kLobby, local, seen}));
-    const Endpoint upnp_seen{seen, 42000};
-    CHECK((ipv4(stun_public, StunState::kDone, upnp_seen) == EndpointChoice{EndpointSource::kUpnp, 42000, seen}));
-    CHECK((ipv4(stun_public, StunState::kDone, upnp_public) == EndpointChoice{EndpointSource::kStun, 41000, seen}));
-
-    for (const char* lan : {"192.168.1.20", "10.1.2.3", "169.254.0.1", "127.0.0.1"}) {
-        CHECK(lobby_lan(lan));
-        const EndpointChoice c = choose_endpoint(parse_ip(lan), true, local, StunState::kDone, stun_public, upnp_public);
-        CHECK((c == EndpointChoice{EndpointSource::kLan, local, parse_ip(lan)}));
-    }
-    for (const char* lan : {"fd12:3456::1", "fe80::1", "::1"}) {
-        CHECK(lobby_lan(lan));
-        const EndpointChoice c = choose_endpoint(parse_ip(lan), true, local, StunState::kDone, stun_public, none);
-        CHECK((c == EndpointChoice{EndpointSource::kLan, local, 0}));
+    for (const bool takes : {false, true}) {
+        CHECK(settled(takes, "203.0.113.12", StunState::kDone, NatMapping::kSame, false));
+        CHECK(!settled(takes, "203.0.113.12", StunState::kRunning, NatMapping::kUnknown, false));
+        CHECK(settled(takes, "203.0.113.12", StunState::kFailed, NatMapping::kUnknown, false));
+        CHECK(settled(takes, "203.0.113.12", StunState::kDone, NatMapping::kSame, true) == takes);
+        CHECK(!settled(takes, "203.0.113.12", StunState::kDone, NatMapping::kOneServer, true));
+        CHECK(!settled(takes, "203.0.113.12", StunState::kDone, NatMapping::kPerDestination, true));
+        CHECK(!settled(takes, "198.51.100.11", StunState::kDone, NatMapping::kSame, true));
+        CHECK(!settled(takes, seen_v6, StunState::kDone, NatMapping::kSame, true));
+        CHECK(settled(takes, "172.19.163.2", StunState::kRunning, NatMapping::kUnknown, true));
     }
 
-    const EndpointChoice stun_v4 = ipv6(stun_public, StunState::kDone);
-    CHECK((stun_v4 == EndpointChoice{EndpointSource::kStun, 41000, stun_public.ip}));
-    CHECK((ipv6(stun_public, StunState::kDone, upnp_public) == EndpointChoice{EndpointSource::kUpnp, 42000, stun_public.ip}));
-    CHECK((ipv6(none, StunState::kFailed, upnp_public) == EndpointChoice{EndpointSource::kUpnp, 42000, upnp_public.ip}));
-    const Endpoint upnp_elsewhere{parse_ip("192.0.2.77"), 42000};
-    CHECK((ipv6(stun_public, StunState::kDone, upnp_elsewhere) == EndpointChoice{EndpointSource::kStun, 41000, stun_public.ip}));
+    // STUN and UPnP on different public addresses: STUN measured the game's own socket, unless it is not one mapping.
+    const Endpoint router{parse_ip("203.0.113.9"), 42000};
+    CHECK((choose_endpoint(facts(seen_v4, true, stun_public, StunState::kDone, router)) == EndpointChoice{EndpointSource::kStun, stun_public}));
+    CHECK((choose_endpoint(facts(seen_v4, true, stun_public, StunState::kDone, router, NatMapping::kPerDestination)) == EndpointChoice{EndpointSource::kUpnp, router}));
+    CHECK((choose_endpoint(facts(seen_v4, false, stun_public, StunState::kDone, router)) == EndpointChoice{EndpointSource::kUpnp, router}));
+    CHECK((choose_endpoint(facts("203.0.113.12", true, none, StunState::kFailed, router)) == EndpointChoice{EndpointSource::kUpnp, router}));
+    // Symmetric NAT without a router mapping: direct is still worth trying, the relay covers the rest.
+    CHECK((choose_endpoint(facts(seen_v4, true, stun_public, StunState::kDone, {}, NatMapping::kPerDestination)) == EndpointChoice{EndpointSource::kStun, stun_public}));
 
-    const EndpointChoice relay{EndpointSource::kRelayFallback, local, 0};
-    CHECK(ipv6(none, StunState::kFailed) == relay);
-    CHECK(ipv6(none, StunState::kRunning) == relay);
-    CHECK(ipv6({parse_ip("192.168.1.20"), 41000}, StunState::kDone) == relay);
-    CHECK(ipv6({parse_ip("100.64.0.13"), 41000}, StunState::kDone) == relay);
-    CHECK(ipv6(none, StunState::kFailed, {parse_ip("192.168.0.2"), 42000}) == relay);
-    CHECK(choose_endpoint(0, lobby_lan(""), local, StunState::kDone, stun_public, none).source == EndpointSource::kStun);
-    CHECK(choose_endpoint(0, lobby_lan(""), local, StunState::kFailed, none, none) == relay);
-
-    // A STUN result that arrives after the fallback report changes what must be reported, though not the port.
-    const Endpoint same_port{stun_public.ip, local};
-    CHECK(ipv6(same_port, StunState::kDone).port == relay.port && ipv6(same_port, StunState::kDone).ip != relay.ip);
-
-    // The relay-only path of issue #49 is taken only when no public IPv4 was found.
+    // The relay-only path of issue #49 is taken only when no public IPv4 was found; members behind one address keep apart.
     const uint16_t member = 0x20;
-    CHECK(signaling_endpoint({stun_v4.ip, stun_v4.port}, member) == stun_public);
-    CHECK(signaling_endpoint({relay.ip, relay.port}, member) == relay_endpoint(member));
+    CHECK(signaling_endpoint(stun_public, member) == stun_public);
+    CHECK(signaling_endpoint(relay.at, member) == relay_endpoint(member));
+    CHECK(signaling_endpoint(stun_public, member, true) == relay_endpoint(member));
 
-    CHECK(endpoint_choice_text(stun_v4, true) == "reporting public STUN endpoint 198.51.100.25:41000");
-    CHECK(endpoint_choice_text({EndpointSource::kUpnp, 42000, stun_public.ip}, true) == "reporting public UPnP endpoint 198.51.100.25:42000");
-    CHECK(endpoint_choice_text({EndpointSource::kLobby, local, seen}, true) == "reporting lobby-observed endpoint 203.0.113.9:3658");
-    CHECK(endpoint_choice_text({EndpointSource::kLan, local, parse_ip("192.168.1.20")}, true) == "reporting LAN endpoint 192.168.1.20:3658");
-    CHECK(endpoint_choice_text({EndpointSource::kLan, local, 0}, true) == "reporting LAN endpoint on port 3658");
+    CHECK(endpoint_choice_text({EndpointSource::kStun, stun_public}, true) == "reporting public STUN endpoint 198.51.100.25:41000");
+    CHECK(endpoint_choice_text({EndpointSource::kUpnp, upnp_public}, true) == "reporting public UPnP endpoint 198.51.100.25:42000");
+    CHECK(endpoint_choice_text(lobby_v4, true) == "reporting lobby-observed address with the local port 203.0.113.9:3658");
+    CHECK(endpoint_choice_text({EndpointSource::kLan, {parse_ip("192.168.1.20"), local}}, true) == "reporting LAN endpoint 192.168.1.20:3658");
+    CHECK(endpoint_choice_text({EndpointSource::kLan, {0, local}}, true) == "reporting LAN endpoint on port 3658");
     CHECK(endpoint_choice_text(relay, true) == "public endpoint unavailable, relay fallback");
     CHECK(endpoint_choice_text(relay, false) == "public endpoint unavailable, relay not offered");
+    CHECK(endpoint_facts_text(facts("203.0.113.12", true, udp_exit), "203.0.113.12") ==
+          "lobby observes 203.0.113.12; STUN 198.51.100.11:59547 (two servers agree); UPnP none; the lobby connection and UDP use "
+          "different public addresses");
+    CHECK(endpoint_facts_text(facts("203.0.113.12", false, udp_exit, StunState::kDone, {parse_ip("192.168.1.1"), 3658}, NatMapping::kOneServer),
+                              "203.0.113.12") ==
+          "lobby observes 203.0.113.12; STUN 198.51.100.11:59547 (one server only); UPnP 192.168.1.1:3658; the lobby connection and "
+          "UDP use different public addresses, and this lobby can only share the one it observes");
+    CHECK(endpoint_facts_text(facts(seen_v6, true, none, StunState::kFailed), seen_v6) ==
+          std::string("lobby observes ") + seen_v6 + "; STUN no answer; UPnP none");
 
     CHECK(lobby_endpoint_text("", "2001:db8::1") == "2001:db8::1" && lobby_endpoint_text("", "203.0.113.9") == "203.0.113.9");
     CHECK(lobby_endpoint_text("198.51.100.25", "2001:db8::1") == "observed 2001:db8::1, public 198.51.100.25");
+
+    Json hello = Json::Object();
+    CHECK(!udp_endpoint_capability(hello));
+    Json capabilities = Json::Object();
+    capabilities.set("relay_supported", true);
+    hello.set("capabilities", capabilities);
+    CHECK(!udp_endpoint_capability(hello));
+    capabilities.set("udp_endpoint", true);
+    hello.set("capabilities", capabilities);
+    CHECK(udp_endpoint_capability(hello));
+}
+
+// The game's socket asks one STUN server for its endpoint, another to confirm it, and the first again to keep it.
+void TestStunMapping() {
+    const Endpoint exit{parse_ip("198.51.100.11"), 59547}, other{parse_ip("198.51.100.11"), 59548};
+    const auto open = [](const std::vector<uint16_t>& ports, int refresh_ms = 60000) {
+        PeerSocket::Options options;
+        options.bind_ip = parse_ip("127.0.0.1");
+        options.stun_refresh_ms = refresh_ms;
+        for (const uint16_t port : ports) options.stun_servers.emplace_back("127.0.0.1", port);
+        std::string error;
+        return PeerSocket::open(options, &error);
+    };
+    const auto mapped_as = [](PeerSocket& s, NatMapping mapping) {
+        return WaitFor([&] { return s.stun().mapping == mapping; }, 8000);
+    };
+    FakeStun first(exit), agrees(exit), disagrees(other), silent(exit, 60000);
+    {
+        const auto s = open({first.port(), agrees.port()});
+        CHECK(s && mapped_as(*s, NatMapping::kSame) && s->stun().mapped == exit && s->stun().state == StunState::kDone);
+    }
+    {
+        const auto s = open({first.port(), disagrees.port()});
+        CHECK(s && mapped_as(*s, NatMapping::kPerDestination) && s->stun().mapped == exit);
+    }
+    for (const std::vector<uint16_t>& ports : {std::vector<uint16_t>{first.port()}, {first.port(), first.port()}}) {
+        const auto s = open(ports);
+        CHECK(s && mapped_as(*s, NatMapping::kOneServer) && s->stun().mapped == exit);
+    }
+    {
+        // The endpoint is known before the confirmation, and a silent second server leaves it unconfirmed.
+        const auto s = open({first.port(), silent.port()});
+        CHECK(s && WaitFor([&] { return s->stun().state == StunState::kDone; }, 1000) && s->stun().mapping == NatMapping::kUnknown);
+        CHECK(mapped_as(*s, NatMapping::kOneServer) && s->stun().mapped == exit);
+    }
+    {
+        const auto s = open({silent.port(), first.port()});
+        CHECK(s && mapped_as(*s, NatMapping::kOneServer) && s->stun().mapped == exit);
+    }
+    {
+        FakeStun late(exit, 1200);
+        const auto s = open({late.port(), agrees.port()});
+        CHECK(s && s->stun().state == StunState::kRunning);
+        CHECK(mapped_as(*s, NatMapping::kSame) && s->stun().mapped == exit);
+    }
+    {
+        FakeStun moving(exit);
+        const auto s = open({moving.port()}, 100);
+        CHECK(s && mapped_as(*s, NatMapping::kOneServer));
+        moving.set_mapped(other);
+        CHECK(WaitFor([&] { return s->stun().mapped == other; }, 3000) && s->stun().state == StunState::kDone);
+    }
+    {
+        PeerSocket::Options options;
+        options.bind_ip = parse_ip("127.0.0.1");
+        std::string error;
+        const auto s = PeerSocket::open(options, &error);
+        CHECK(s && s->stun().state == StunState::kIdle && s->stun().mapping == NatMapping::kUnknown);
+    }
+}
+
+// Members that share one address stay separate: the game gets the relay's endpoint of each.
+void TestSharedAddressKeepsPeersApart() {
+    PeerSocket::Options options;
+    options.bind_ip = parse_ip("127.0.0.1");
+    std::string error;
+    const auto s = PeerSocket::open(options, &error);
+    CHECK(s);
+    if (!s) return;
+    const Endpoint proxy{parse_ip("203.0.113.12"), 3658};
+    s->set_peer(7, {proxy}, 0x20);
+    s->set_peer(8, {proxy}, 0x30);
+    CHECK(s->peer_at(signaling_endpoint(proxy, 0x20, true)) == 7 && s->peer_at(signaling_endpoint(proxy, 0x30, true)) == 8);
 }
 
 void TestStun() {
@@ -1543,6 +1750,33 @@ void TestRelayWindowAndDirectCadence() {
         CHECK(silent.received() >= before + 4);
     }
     CHECK(std::abs(hellos_with_relay - hellos_without_relay) <= 4);
+}
+
+// A peer called on its previous endpoint, whose new one arrives before the relay is offered, is still reached directly.
+void TestNewEndpointGetsTheHeadStart() {
+    SilentPeer stale, fresh;
+    Peer a = OpenPeer(1001, kMemberA);
+    CHECK(a.socket);
+    if (!a.socket) return;
+    RelayBroker broker(kRoomToken);
+    broker.SetSwallowAll(true);
+    EnableRelay(a, broker);
+    const uint32_t loopback = parse_ip("127.0.0.1");
+    a.socket->set_peer(2002, {{loopback, stale.port()}}, kMemberB);
+    const uint64_t started = now_ms();
+    const int link = a.socket->connect(2002);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    a.socket->set_peer(2002, {{loopback, fresh.port()}}, kMemberB);
+    a.socket->set_peer(2002, {{loopback, fresh.port()}}, kMemberB);
+    while (now_ms() - started < 3600) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK(fresh.received() >= 1 && a.socket->path(link) == LinkPath::kConnectingDirect && a.socket->relay_stats().frames_out == 0);
+    CHECK(WaitFor([&] { return a.socket->path(link) == LinkPath::kRelayOffered; }, 1500));
+    const uint64_t offered = now_ms() - started;
+    CHECK(offered >= 3900 && offered <= 5100);
+    // Once offered, the relay stays offered whatever the endpoint does.
+    a.socket->set_peer(2002, {{loopback, stale.port()}}, kMemberB);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    CHECK(a.socket->path(link) == LinkPath::kRelayOffered);
 }
 
 // A direct path that only becomes reachable after the relay was offered still wins: nothing is cancelled.
@@ -2955,7 +3189,7 @@ void TestRelayEndsReleaseOutsideTheLock() {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc > 1) g_only = argv[1];
+    g_only.assign(argv + 1, argv + argc);
     if (!sockets_ready()) {
         std::printf("FAILED: no sockets\n");
         return 1;
@@ -2979,7 +3213,11 @@ int main(int argc, char** argv) {
         TestSecondInstancePort();
     });
     Group("address-classification", TestAddressText);
-    Group("endpoint-selection", TestEndpointChoice);
+    Group("endpoint-selection", [&] {
+        TestEndpointChoice();
+        TestSharedAddressKeepsPeersApart();
+    });
+    Group("stun-mapping", TestStunMapping);
     Group("connection-test", [&] {
         TestConnectionSummary();
         TestConnectionTestSocket();
@@ -2999,6 +3237,7 @@ int main(int argc, char** argv) {
     });
     Group("relay-fallback", [&] {
         TestRelayWindowAndDirectCadence();
+        TestNewEndpointGetsTheHeadStart();
         TestRelayTakesOverWhenDirectIsSilent();
         TestMixedRoomPicksAPathPerPeer();
         TestRelayOnlyPeerConnectsAtOnce();
@@ -3071,7 +3310,7 @@ int main(int argc, char** argv) {
             TestLobby(base);
             TestLobbyRelay(base);
         });
-    } else if (!g_only) {
+    } else if (g_only.empty()) {
         std::printf("GROUP|lobby-binary|SKIPPED|DCP_TEST_LOBBY is not set\n");
     }
     std::printf("%s (%d failures)\n", g_failures ? "FAILED" : "OK", g_failures);

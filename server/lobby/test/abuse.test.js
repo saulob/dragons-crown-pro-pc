@@ -660,3 +660,100 @@ test('clients that advertise nothing keep every report and spend no endpoint bud
   assert.equal(peer.events('peer').length, 3);
   assert.equal(env.lobby.guards.publicEndpoint.buckets.size, 0);
 });
+
+const endpointClaim = (ip, port = 59547) => ({ port: 3658, endpoint: { ip, port } });
+
+test('udp endpoint budget: every limit keys on the observed IPv4, and the claim never buys another identity', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, '203.0.113.12');
+  assert.equal(client.call('udp', endpointClaim(ADVERTISED)).public_ip, ADVERTISED);
+  assert.equal(client.call('room.create', ROOM).code, 'ok');
+  const { guards } = env.lobby;
+  assert.deepEqual([...guards.publicEndpoint.buckets.keys()], ['203.0.113.12']);
+  assert.deepEqual([...guards.publicEndpointAccount.buckets.keys()], [client.account]);
+  assert.deepEqual([...guards.publicEndpointTarget.buckets.keys()], [ADVERTISED]);
+  assert.ok(guards.roomCreateAddress.buckets.has('203.0.113.12') && !guards.roomCreateAddress.buckets.has(ADVERTISED));
+});
+
+test('udp endpoint budget: rapid churn ends, and past it peers get the observed address with its own port', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, '203.0.113.12');
+  const room = client.call('room.create', ROOM).room;
+  const peer = signedIn(env, CLIENT, '203.0.113.20');
+  assert.equal(peer.call('room.join', { room: room.id }).code, 'ok');
+  peer.events('peer');
+  const { burst } = PROTECTION.publicEndpoint;
+  const told = [];
+  for (let i = 0; i < burst * 3; i += 1) {
+    const reply = client.call('udp', endpointClaim(`192.0.2.${i + 1}`, 41000 + i));
+    if (reply.public_ip) told.push(reply.public_ip);
+    else assert.deepEqual([reply.code, reply.ip, reply.port], ['ok', '203.0.113.12', 3658]);
+    env.advance(50);
+  }
+  assert.equal(told.length, burst);
+  const events = peer.events('peer');
+  assert.equal(new Set(events.map((e) => e.ip).filter((ip) => ip !== '203.0.113.12')).size, burst);
+  assert.ok(events.every((e) => e.ip !== '203.0.113.12' || e.port === 3658));
+  env.advance(1000 / PROTECTION.publicEndpoint.perSecond);
+  assert.equal(client.call('udp', endpointClaim('192.0.2.200')).public_ip, '192.0.2.200');
+});
+
+test('udp endpoint budget: an account keeps its own budget across addresses and reconnects', () => {
+  const env = makeLobby();
+  let client = signedIn(env, CLIENT, '203.0.113.30');
+  for (let i = 0; i < PROTECTION.publicEndpointAccount.burst; i += 1) {
+    assert.equal(client.call('udp', endpointClaim(`192.0.2.${i + 1}`)).public_ip, `192.0.2.${i + 1}`);
+    client.drop();
+    client = reconnect(env, client, CLIENT, `203.0.113.${31 + i}`).client;
+  }
+  assert.equal(client.call('udp', endpointClaim('192.0.2.99')).public_ip, undefined);
+  assert.equal(signedIn(env, CLIENT, '203.0.113.99').call('udp', endpointClaim('192.0.2.99')).public_ip, '192.0.2.99');
+});
+
+test('udp endpoint budget: many accounts and addresses cannot keep pointing players at one victim', () => {
+  const env = makeLobby();
+  const { burst, perSecond } = PROTECTION.publicEndpointTarget;
+  let accepted = 0;
+  for (let i = 0; i < burst * 2; i += 1) {
+    const reply = signedIn(env, CLIENT, `203.0.113.${i + 1}`).call('udp', endpointClaim(ADVERTISED, 20000 + i));
+    if (reply.public_ip) accepted += 1;
+  }
+  assert.equal(accepted, burst);
+  const other = signedIn(env, CLIENT, '192.0.2.10');
+  assert.equal(other.call('udp', endpointClaim(ADVERTISED)).public_ip, undefined);
+  assert.equal(other.call('udp', endpointClaim('198.51.100.26')).public_ip, '198.51.100.26');
+  env.advance(1000 / perSecond);
+  assert.equal(other.call('udp', endpointClaim(ADVERTISED)).public_ip, ADVERTISED);
+});
+
+test('udp endpoint budget: a refused claim spends nothing of the other budgets', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, '203.0.113.12');
+  for (let i = 0; i < PROTECTION.publicEndpoint.burst + 5; i += 1) client.call('udp', endpointClaim(`192.0.2.${i + 1}`));
+  const { guards } = env.lobby;
+  assert.equal(guards.publicEndpointTarget.buckets.size, PROTECTION.publicEndpoint.burst);
+  assert.equal(guards.publicEndpointTarget.tokens('192.0.2.200', env.clock.now), PROTECTION.publicEndpointTarget.burst);
+});
+
+test('udp endpoint budget: repeating a claim costs nothing and tells peers nothing', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, '203.0.113.12');
+  const room = client.call('room.create', ROOM).room;
+  const peer = signedIn(env, CLIENT, '203.0.113.20');
+  assert.equal(peer.call('room.join', { room: room.id }).code, 'ok');
+  client.call('udp', endpointClaim(ADVERTISED));
+  peer.events('peer');
+  const writes = countWrites(env);
+  for (let i = 0; i < PROTECTION.publicEndpoint.burst * 3; i += 1) {
+    assert.equal(client.call('udp', endpointClaim(ADVERTISED)).public_ip, ADVERTISED);
+    env.advance(100);
+  }
+  assert.deepEqual([writes.length, peer.events('peer').length], [0, 0]);
+});
+
+test('udp endpoint budget: the minimum port holds for the older IPv6 form too', () => {
+  const env = makeLobby();
+  const client = signedIn(env, CLIENT, OBSERVED);
+  assert.equal(client.call('udp', { port: 53, public_ip: ADVERTISED }).public_ip, undefined);
+  assert.equal(client.call('udp', { port: LIMITS.endpointMinPort, public_ip: ADVERTISED }).public_ip, ADVERTISED);
+});

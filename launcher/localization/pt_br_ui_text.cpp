@@ -508,10 +508,14 @@ Direct connections	Conexões diretas
 Another router is in front of yours (often your provider's), so it cannot be opened automatically.	Há outro roteador na frente do seu (muitas vezes o do provedor), então ele não pode ser aberto automaticamente.
 Automatic setup is not available on your router.	A configuração automática não está disponível no seu roteador.
 Router configuration	Configuração do roteador
-Relay	Relay
+Relay fallback	Relay de reserva
 Available. A match that cannot connect directly connects through the online service	Disponível. Uma partida que não consegue se conectar diretamente se conecta pelo serviço online
 Not ready: cannot reach the online service	Não está pronto: não é possível acessar o serviço online
 Ready for online play	Pronto para jogar online
+Ready for online play through the relay	Pronto para jogar online pelo relay
+Ready for online play; direct depends on your network	Pronto para jogar online; conexão direta depende da sua rede
+Unlikely: your game and the online service use different public addresses (proxy or VPN?), and it cannot share the game's yet	Improvável: seu jogo e o serviço online usam endereços públicos diferentes (proxy ou VPN?), e ele ainda não pode compartilhar o do jogo
+Your game and the online service use different public addresses (proxy or VPN?). Direct connectivity will be verified when joining a match	Seu jogo e o serviço online usam endereços públicos diferentes (proxy ou VPN?). A conectividade direta será verificada ao entrar em uma partida
 Limited: the multiplayer UDP port could not be opened	Limitado: não foi possível abrir a porta UDP do multijogador
 Limited: direct connections may be blocked by your network	Limitado: conexões diretas podem estar bloqueadas pela sua rede
 Limited: some players may not be able to connect to you	Limitado: alguns jogadores podem não conseguir se conectar a você

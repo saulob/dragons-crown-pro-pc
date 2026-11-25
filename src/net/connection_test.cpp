@@ -2,6 +2,7 @@
 
 #include "net/addr.h"
 #include "net/lobby_link.h"
+#include "net/peer_socket.h"
 #include "net/relay_frame.h"
 #include "net/stun.h"
 #include "net/upnp.h"
@@ -46,8 +47,8 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
         line(Mark::kProblem, "Online service", "Cannot reach the online service. Check your internet connection.");
     }
 
-    const bool direct = f.udp_ok && (f.public_address || !f.second_answer || f.same_mapping);
-    const bool router_opened = f.router == Router::kMapped;
+    const bool direct = f.udp_ok && f.endpoint_shared && (f.public_address || !f.second_answer || f.same_mapping);
+    const bool router_opened = f.router == Router::kMapped && f.endpoint_shared;
     const std::string port = std::to_string(f.udp_port);
     const std::string on_port = f.udp_port ? " on UDP port " + port + "." : ".";
     const std::string where = f.udp_port ? " on UDP port " + port : "";
@@ -60,6 +61,14 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
         line(Mark::kNote, "Direct connections", "Not checked.");
     } else if (!f.udp_ok) {
         line(Mark::kProblem, "Direct connections", "May be blocked by your network or firewall" + on_port);
+    } else if (!f.endpoint_shared) {
+        line(Mark::kProblem, "Direct connections",
+             "Unlikely: your game and the online service use different public addresses (proxy or VPN?), and it cannot share "
+             "the game's yet");
+    } else if ((direct || router_opened) && f.other_path) {
+        line(Mark::kNote, "Direct connections",
+             "Your game and the online service use different public addresses (proxy or VPN?). Direct connectivity will be "
+             "verified when joining a match");
     } else if (direct) {
         const char* text = f.second_answer || f.public_address ? "UDP endpoint available" : "UDP endpoint probably available";
         line(Mark::kOk, "Direct connections", text + where + verified_in_match);
@@ -81,12 +90,12 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
                 entry.mark = Mark::kNote;
             }
         }
-        line(Mark::kOk, "Relay", "Available. A match that cannot connect directly connects through the online service");
+        line(Mark::kOk, "Relay fallback", "Available. A match that cannot connect directly connects through the online service");
     }
     r.details.push_back(relay ? "relay: advertised by the online service" : f.relay_ok ? "relay: needs the UDP port"
                                                                                        : "relay: not offered by the online service");
     if (f.udp_ok && f.second_answer && !f.same_mapping && !f.public_address) {
-        r.details.push_back("NAT: another public port per destination (symmetric NAT)");
+        r.details.push_back("NAT: another public endpoint per destination (endpoint-dependent or symmetric NAT)");
     } else if (f.udp_ok && !f.second_answer) {
         r.details.push_back("NAT: type unknown, only one STUN server answered");
     }
@@ -100,7 +109,9 @@ ConnectionReport summarize_connection(const ConnectionFacts& f) {
     if (!f.identity_ok || !f.lobby_ok) {
         r.verdict = "Not ready: cannot reach the online service";
     } else if (r.ready) {
-        r.verdict = "Ready for online play";
+        r.verdict = !direct && !router_opened ? "Ready for online play through the relay"
+                    : f.other_path            ? "Ready for online play; direct depends on your network"
+                                              : "Ready for online play";
     } else if (!f.port_open) {
         r.verdict = "Limited: the multiplayer UDP port could not be opened";
     } else if (!f.udp_ok && !f.stun_off) {
@@ -116,6 +127,8 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
     ConnectionFacts facts;
     std::vector<std::string> details;
     std::string friend_code, lobby_ip;
+    EndpointFacts endpoint;
+    endpoint.local_port = udp_port ? udp_port : connection_test_port(config);
 
     facts.identity_ok = identity.ok();
     if (!facts.identity_ok) {
@@ -131,6 +144,9 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
             facts.relay_ok = capability.usable();
             facts.lobby_latency_ms = int64_t(now_ms() - start);
             lobby_ip = reply["ip"].as_string();
+            endpoint.lobby_ip = parse_ip(lobby_ip);
+            endpoint.lobby_on_lan = is_lan(classify_text(lobby_ip));
+            endpoint.lobby_takes_endpoint = udp_endpoint_capability(reply);
             friend_code = reply["friend_code"].as_string();
             details.push_back("lobby " + config.lobby + " answered in " + std::to_string(facts.lobby_latency_ms) +
                               " ms; it sees " + lobby_ip);
@@ -174,10 +190,11 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
         facts.public_address = facts.udp_ok && first.ip == default_route_ip();
         facts.second_answer = second.valid();
         facts.same_mapping = second.valid() && second == first;
-        const uint32_t seen = parse_ip(lobby_ip);
-        if (facts.udp_ok && seen && seen != first.ip && classify(seen) == AddressKind::kPublic) {
-            details.push_back("the lobby and STUN see different addresses");
-        }
+        endpoint.stun.state = first.valid() ? StunState::kDone : StunState::kFailed;
+        endpoint.stun.mapped = first;
+        endpoint.stun.mapping = !second.valid() ? NatMapping::kOneServer
+                                : facts.same_mapping ? NatMapping::kSame
+                                                     : NatMapping::kPerDestination;
     }
 
     if (!facts.port_open) {
@@ -187,6 +204,7 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
         if (u.state == upnp::State::kMapped) {
             facts.router = classify(u.external.ip) == AddressKind::kPublic ? ConnectionFacts::Router::kMapped
                                                                             : ConnectionFacts::Router::kMappedBehindNat;
+            endpoint.upnp = u.external;
             details.push_back("UPnP: " + u.detail + "; router address " + ip_text(u.external.ip));
         } else {
             details.push_back("UPnP: not available: " + u.detail);
@@ -196,6 +214,13 @@ ConnectionReport run_connection_test(const OnlineConfig& config, const Identity&
     }
     if (s != kNoSocket) close_socket(s);
 
+    if (facts.lobby_ok) {
+        const EndpointChoice choice = choose_endpoint(endpoint);
+        facts.other_path = paths_differ(endpoint);
+        facts.endpoint_shared = !facts.other_path || choice.source == EndpointSource::kStun || choice.source == EndpointSource::kUpnp;
+        details.push_back(endpoint_facts_text(endpoint, lobby_ip));
+        details.push_back("in a match: " + endpoint_choice_text(choice, facts.relay_ok));
+    }
     ConnectionReport report = summarize_connection(facts);
     report.friend_code = std::move(friend_code);
     details.insert(details.end(), report.details.begin(), report.details.end());
