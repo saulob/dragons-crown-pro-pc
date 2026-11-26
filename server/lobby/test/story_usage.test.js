@@ -221,7 +221,8 @@ test('the summary keeps its existing fields beside the story section, and it hol
   client.call('udp', { port: 41000 });
   guestOf(env, room).call('udp', { port: 41001 });
   const summary = env.lobby.metricsSummary();
-  assert.deepEqual(Object.keys(summary).sort(), ['boss', 'comms', 'day', 'generated', 'live', 'story', 'time_zone', 'today']);
+  assert.deepEqual(Object.keys(summary).sort(), ['boss', 'clean_online_required', 'comms', 'day', 'generated', 'live', 'story', 'time_zone',
+    'today']);
   const dump = JSON.stringify(summary.story);
   for (const secret of [room.code, room.key, '198.51.100', '41000', '41001', client.secret]) assert.ok(!dump.includes(secret), secret);
   assert.deepEqual(Object.keys(summary.story.users[0]).sort(), ['account', 'active', 'last_used', 'name', 'role', 'sessions']);

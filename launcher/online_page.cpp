@@ -28,6 +28,18 @@ const char* kEarlyStoryHelp =
     "Lets you host online play right after the tutorial. The tutorial remains single-player. Only the host needs this "
     "option; guests keep their own campaign progress. Early story rooms are friend/direct only.";
 const char* kUnreachable = "Cannot reach the online service right now. Run the Connection test for details.";
+const char* kIntegrityRefused =
+    "This online service accepts only saves never used with gameplay cheats or gameplay Editor changes. The Saves page "
+    "shows the state of your save.";
+const char* kIntegrityUnknown =
+    "This online service accepts only saves whose integrity status is known, and it could not be read for your save. "
+    "The Saves page shows the state of your save.";
+
+const char* UnreachableText(const std::string& refusal) {
+    if (refusal == net::kSaveIntegrityMarked) return kIntegrityRefused;
+    if (refusal == net::kSaveIntegrityUnknown) return kIntegrityUnknown;
+    return kUnreachable;
+}
 const char* kLobbyHiddenHelp =
     "Enable this option to let other Dragon's Crown Pro players see your Online name and send you a friend request.";
 const char* kLobbyShownHelp = "Other Dragon's Crown Pro players can see your Online name and send you a friend request.";
@@ -119,6 +131,7 @@ void OnlinePage::Tick(LauncherSettings& settings, double now) {
     }
     ForgetConnectionTestWhenOff(settings, on);
     RecordFinishedTest(settings, on);
+    if (save_title_) client_.SetSaveTitle(save_title_());
     client_.Update(on, config, net::kOnlineGame, now);
 }
 
@@ -364,7 +377,7 @@ void OnlinePage::DrawConnectionTest(trg::Ui& ui) {
 void OnlinePage::DrawFriends(trg::Ui& ui) {
     const OnlineClient::State state = client_.state();
     if (state.link == OnlineClient::Link::kUnreachable) {
-        ui.Help(kUnreachable);
+        ui.Help(UnreachableText(state.refusal));
     } else if (!state.notice.empty()) {
         ui.Help(TrValue(state.notice).c_str());
     }
@@ -491,7 +504,7 @@ void OnlinePage::DrawLobbyPlayers(trg::Ui& ui) {
     const OnlineClient::State state = client_.state();
     DrawLobbyHeader(ui, state);
     if (state.link == OnlineClient::Link::kUnreachable) {
-        ui.Help(kUnreachable);
+        ui.Help(UnreachableText(state.refusal));
     } else if (!state.lobby_problem.empty()) {
         ui.Help(state.lobby_problem.c_str());
     } else if (!state.notice.empty()) {

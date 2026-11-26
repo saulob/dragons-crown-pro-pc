@@ -13,6 +13,7 @@
 #include "runtime.h"
 #include "trophies/trophy_runtime.h"
 #include "runtime_cheats.h"
+#include "runtime_integrity.h"
 #include "runtime_online.h"
 #include "menu_buttons.h"
 #include "skip_intro.h"
@@ -889,6 +890,8 @@ int main(int argc, char **argv) {
         runtime_cheats_set_player_observer(character_highlight_observe_unit);
     }
     runtime_cheats_set_online(runtime_online_play_enabled());
+    runtime_cheats_set_use_sink(runtime_integrity_cheat_used);
+    runtime_online_set_integrity_source(runtime_integrity_hello_flags);
     runtime_cheats_start(dcp_saved_cheats(settings_file), dcp_saved_experience_multiplier(settings_file),
                          dcp_saved_movement_speed(settings_file), dcp_saved_damage_taken(settings_file),
                          dcp_saved_damage_multiplier(settings_file));

@@ -25,6 +25,8 @@ int runtime_online_check_imports(const char (*names)[128], const unsigned char *
                                  uintptr_t (*resolve)(const char *name, int is_data));
 /* 1 when the game goes online: Online Play on, a supported build whose online imports resolve, and an identity. */
 int runtime_online_active(void);
+/* What the lobby hello reports as integrity_flags (runtime_integrity_hello_flags); -1 or no source leaves it out. */
+void runtime_online_set_integrity_source(int (*flags)(void));
 /* The System type line of the game's player card for an online id ("Windows · v0.8.0"); valid until the next call on
  * the same thread. */
 const char *runtime_online_system_type(const char *online_id);

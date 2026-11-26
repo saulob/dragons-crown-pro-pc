@@ -27,7 +27,8 @@ test('the attribute is private and hello advertises boss_battle_session', () => 
   const env = makeLobby();
   for (const fields of [MODERN, OLD]) {
     const reply = env.connect().hello(fields);
-    assert.deepEqual(reply.capabilities, { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true });
+    assert.deepEqual(reply.capabilities, { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true,
+      save_integrity: true, clean_online_required: false });
   }
 });
 

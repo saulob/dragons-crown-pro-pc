@@ -68,6 +68,17 @@ bool appearance_capability(const Json& hello_reply);
 // Whether the lobby takes a `udp` report's `endpoint` on another address than the one it observes.
 bool udp_endpoint_capability(const Json& hello_reply);
 
+// Save integrity (docs/ONLINE.md): bit 0 gameplay cheats used, bit 1 gameplay Editor changes; 0 is clean. A hello
+// without `integrity_flags` is unknown, never clean.
+inline constexpr int kIntegrityFlagsMax = 3;
+inline constexpr char kSaveIntegrityUnknown[] = "save_integrity_unknown";
+inline constexpr char kSaveIntegrityMarked[] = "save_integrity_marked";
+// Adds `integrity_flags` for 0 to 3; an unknown state (any other value) leaves the field out.
+void set_integrity_flags(Json& hello, int flags);
+bool save_integrity_capability(const Json& hello_reply);
+bool clean_online_required(const Json& hello_reply);
+bool save_integrity_refusal(const std::string& code);
+
 // Relay frames waiting for the socket; a link this far behind is not carrying a game any more.
 inline constexpr size_t kMaxQueuedBinary = 512;
 

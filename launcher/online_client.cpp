@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "net/identity.h"
+#include "save_integrity.h"
 
 namespace dcp {
 namespace {
@@ -58,7 +59,7 @@ void OnlineClient::Update(bool on, const net::OnlineConfig& config, const std::s
     }
     const bool first = state_.link == Link::kOff;
     const bool settled = first || now - name_since_ >= kNameSettleSeconds;
-    if (link_ && (config.lobby != url_ || game != game_ || (name != name_ && settled))) {
+    if (link_ && (config.lobby != url_ || game != game_ || title_ != started_title_ || (name != name_ && settled))) {
         Stop();
         state_.link = Link::kConnecting;
         retry_at_ = 0;
@@ -80,6 +81,7 @@ void OnlineClient::Start(const net::OnlineConfig& config, const std::string& gam
     url_ = config.lobby;
     game_ = game;
     name_ = name;
+    started_title_ = title_;
     const net::Identity identity = net::load_identity(user_dir_);
     if (!identity.ok()) {
         std::printf("Online: no online identity (%s)\n", identity.error.c_str());
@@ -89,7 +91,11 @@ void OnlineClient::Start(const net::OnlineConfig& config, const std::string& gam
     }
     net::LobbyLink::Options options;
     options.url = url_;
-    options.hello = [identity, name, game] { return net::hello_body(identity, name, game, true); };
+    options.hello = [identity, name, game, user_dir = user_dir_, title = title_] {
+        net::Json hello = net::hello_body(identity, name, game, true);
+        net::set_integrity_flags(hello, HelloIntegrityFlags(user_dir, title, ""));
+        return hello;
+    };
     link_ = std::make_unique<net::LobbyLink>(std::move(options));
     link_->start();
     state_.link = Link::kConnecting;
@@ -165,6 +171,7 @@ void OnlineClient::Handle(const net::LobbyMessage& message, double now) {
         lobby_told_ = lobby_listed_ = false;
         lobby_refresh_.Reset();
         lobby_retry_at_ = 0;
+        state_.refusal.clear();
         Fetch(now);
         break;
     case Kind::kLost:
@@ -175,6 +182,7 @@ void OnlineClient::Handle(const net::LobbyMessage& message, double now) {
                     message.code.c_str(), kRetrySeconds);
         Stop();
         state_.link = Link::kUnreachable;
+        state_.refusal = message.code;
         retry_at_ = now + kRetrySeconds;
         break;
     case Kind::kEvent:

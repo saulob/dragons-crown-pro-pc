@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -20,7 +21,9 @@ class LauncherSettings;
 // (OnlineClient) runs on every launcher frame, not only while the page is shown.
 class OnlinePage {
 public:
-    explicit OnlinePage(std::filesystem::path user_dir) : user_dir_(user_dir), client_(std::move(user_dir)) {}
+    // `save_title` names the installed game's title id, whose saves the sign-in reports (save_integrity.h).
+    explicit OnlinePage(std::filesystem::path user_dir, std::function<std::string()> save_title = {})
+        : user_dir_(user_dir), client_(std::move(user_dir)), save_title_(std::move(save_title)) {}
     ~OnlinePage();
 
     void Tick(LauncherSettings& settings, double now);
@@ -61,6 +64,7 @@ private:
 
     std::filesystem::path user_dir_;
     OnlineClient client_;
+    std::function<std::string()> save_title_;
     OnlineTab tab_ = OnlineTab::kSettings;
     bool was_on_ = false;
     bool pointed_ = false;

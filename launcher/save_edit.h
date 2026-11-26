@@ -10,6 +10,7 @@
 #include "hp_override.h"
 #include "save_data.h"
 #include "save_discovery.h"
+#include "save_integrity.h"
 
 namespace dcp {
 
@@ -57,17 +58,26 @@ struct ApplyOutcome {
     bool custom_failed = false;
     bool override_written = false;
     bool override_failed = false;
+    bool integrity_marked = false;
+    bool integrity_failed = false;
     bool rolled_back = false; // sidecar files were put back after another half could not be written
     bool ok() const {
-        return !custom_failed && !override_failed &&
+        return !custom_failed && !override_failed && !integrity_failed &&
                (save == SaveEdit::Result::kApplied || save == SaveEdit::Result::kNothingToApply);
     }
 };
 
-// Writes the sidecar files, then the save; when any step fails, prior sidecar files are put back so neither half is
-// reported applied on its own. `saved` and `override_saved` follow what is on disk afterwards.
+// The save container an Apply marks when IsGameplayEdit says it changes gameplay.
+struct IntegrityTarget {
+    std::filesystem::path user_dir;
+    SaveKey key;
+};
+
+// Records a gameplay change in online_integrity.dat, writes the sidecar files, then the save; when any step fails, prior
+// files are put back so neither half is reported applied on its own. `saved` and `override_saved` follow what is on
+// disk afterwards.
 ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
                       const CharacterOverrideStore* override_working = nullptr,
-                      CharacterOverrideStore* override_saved = nullptr);
+                      CharacterOverrideStore* override_saved = nullptr, const IntegrityTarget* integrity = nullptr);
 
 } // namespace dcp

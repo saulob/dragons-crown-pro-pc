@@ -9,7 +9,8 @@ import { CAPABILITIES, Relay } from './relay.js';
 import { difficultyCategory } from './difficulty.js';
 import { parsePartyReport } from './party.js';
 import { CommsUsage, commsSummary, parseCommsReport } from './comms_usage.js';
-import { Metrics, countryCode, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS } from './metrics.js';
+import { Metrics, countryCode, integrityCategory, platformBit, platformCategory, sampleBucket, versionCategory, SAMPLE_MS }
+  from './metrics.js';
 import { sha256Hex, toHex } from './sha256.js';
 import { BOSS_STATE_ATTR, BossUsage } from './boss_usage.js';
 import { STORY_ROLES, STORY_SEEN_PER_ROOM, StoryUsage, storyRole } from './story_usage.js';
@@ -86,6 +87,11 @@ const LOBBY_REV = /^[0-9a-f]{16}$/;
 const LOBBY_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,15}$/;
 const LOBBY_RANK = { incoming: 0, pending: 1, friend: 2, none: 3 };
 const DEFAULT_NAME = 'Player';
+// Save integrity (docs/ONLINE.md): bit 0 gameplay cheats, bit 1 gameplay Editor changes. These refuse a presence sign-in
+// while clean online is required.
+export const INTEGRITY_FLAGS_MAX = 3;
+export const SAVE_INTEGRITY_UNKNOWN = 'save_integrity_unknown';
+export const SAVE_INTEGRITY_MARKED = 'save_integrity_marked';
 const UNKNOWN_OP = 'unknown op';
 
 export class LobbyError extends Error {
@@ -136,6 +142,13 @@ const MIGRATIONS = [
 // ---- input validation ----
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+
+// null when the client did not report it (an older client): unknown, which is not clean.
+function integrityFlags(msg) {
+  if (!Object.hasOwn(msg, 'integrity_flags')) return null;
+  if (!isInt(msg.integrity_flags, 0, INTEGRITY_FLAGS_MAX)) fail('bad_request', 'integrity_flags');
+  return msg.integrity_flags;
+}
 const uint32 = (v) => (isInt(v, 0, 0xffffffff) ? v : fail('bad_request', 'uint32 expected'));
 
 function decimalId(v) {
@@ -257,6 +270,7 @@ export class Lobby {
   constructor(host, options = {}) {
     this.host = host;
     this.local = Boolean(options.local);
+    this.cleanOnlineRequired = options.cleanOnlineRequired === true;
     for (const statement of SCHEMA) host.sql.run(statement);
     for (let done = Number(this.meta('schema') ?? 0); done < MIGRATIONS.length; done++) {
       for (const statement of MIGRATIONS[done]) host.sql.run(statement);
@@ -591,6 +605,7 @@ export class Lobby {
       platform: tally((att) => platformCategory(att.platform)),
       version: tally((att) => versionCategory(att.version)),
       country: tally((att) => countryCode(att.country)),
+      integrity: tally((att) => integrityCategory(att.integrity_flags)),
     };
   }
 
@@ -629,7 +644,7 @@ export class Lobby {
 
   metricsSummary() {
     return { ...this.metrics.summary(this.liveMetrics()), story: this.storySummary(), boss: this.bossSummary(),
-      comms: this.commsSummary() };
+      comms: this.commsSummary(), clean_online_required: this.cleanOnlineRequired };
   }
 
   attempt(read) {
@@ -1310,6 +1325,14 @@ export class Lobby {
     return this.accountRow(entry.att.account);
   }
 
+  // Only a save the official client reports clean may be online; a client that reports nothing is not assumed clean.
+  requireCleanSave(account, integrity) {
+    if (integrity === 0) return;
+    const code = integrity === null ? SAVE_INTEGRITY_UNKNOWN : SAVE_INTEGRITY_MARKED;
+    this.countReject(code, account);
+    fail(code);
+  }
+
   accountByCode(text) {
     return this.host.sql.get('SELECT * FROM accounts WHERE code = ?', normalizeFriendCode(text)) ?? fail('not_found');
   }
@@ -1326,6 +1349,7 @@ const HANDLERS = {
     if (typeof msg.game !== 'string' || !/^[A-Za-z0-9._-]{1,32}$/.test(msg.game)) fail('bad_request', 'game');
     const account = decimalId(msg.account);
     if (typeof msg.secret !== 'string' || !/^[0-9a-f]{64}$/.test(msg.secret)) fail('bad_request', 'secret');
+    const integrity = integrityFlags(msg);
     const name = cleanText(msg.name ?? '', LIMITS.nameChars) || 'Player';
     const hash = sha256Hex(msg.secret);
     const now = this.host.now();
@@ -1333,6 +1357,7 @@ const HANDLERS = {
     let row = this.accountRow(account);
     if (row && row.secret_hash !== hash) fail('unauthorized');
     this.limitHello(att, account, now);
+    if (presence && this.cleanOnlineRequired) this.requireCleanSave(account, integrity);
     let newSession = presence;
     if (!row) {
       const ipKey = this.ipKey(att.ip);
@@ -1353,7 +1378,7 @@ const HANDLERS = {
     const platform = cleanText(msg.platform ?? '', LIMITS.platformChars);
     Object.assign(att, { hello: true, account, name, presence, game: msg.game, room: 0, member: 0, online_protocol: online,
       version, platform, relay: msg.relay === true, story_session: msg.story_session === true,
-      boss_battle_session: msg.boss_battle_session === true, appearance: msg.appearance === true });
+      boss_battle_session: msg.boss_battle_session === true, appearance: msg.appearance === true, integrity_flags: integrity });
     if (att.relay) this.relays.negotiated();
     if (msg.lobby === true && presence && LOBBY_NAME.test(name)) this.showInLobby(att, now);
     this.index = null;
@@ -1362,7 +1387,8 @@ const HANDLERS = {
     else if (presence) this.diagnose('hello_reconnect_deduped');
     this.diagnose('hello_accepted');
     return { account, name, friend_code: formatFriendCode(row.code), ip: att.ip, time: now,
-      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true } };
+      capabilities: { ...CAPABILITIES, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true,
+        save_integrity: true, clean_online_required: this.cleanOnlineRequired } };
   },
 
   worlds(att) {

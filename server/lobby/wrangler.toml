@@ -2,6 +2,10 @@ name = "dcp-lobby"
 main = "src/worker.js"
 compatibility_date = "2025-09-01"
 
+# "true" refuses presence sign-ins whose save is not reported clean (README.md, Save integrity).
+[vars]
+CLEAN_ONLINE_REQUIRED = "false"
+
 [[durable_objects.bindings]]
 name = "LOBBY"
 class_name = "LobbyObject"

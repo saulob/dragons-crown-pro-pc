@@ -85,6 +85,25 @@ Rooms without the attribute behave as before. The protocol versions are unchange
 as an ordinary room internal binary attribute (`room.set_internal` / `room.internal`); the server does not interpret it. Deploying this needs a Worker
 redeploy (`.\tools\worker.ps1`); nothing in the repository deploys it.
 
+### Save integrity
+
+`hello` takes an optional `integrity_flags`: an integer 0 to 3, bit 0 gameplay cheats used, bit 1 gameplay Editor
+changes, 0 clean ([docs/ONLINE.md](../../docs/ONLINE.md#save-integrity)). Any other value is `bad_request`
+(`integrity_flags`); a hello without it is unknown (`null` on the attachment), never clean. The value lives only on the
+connection's attachment and is never sent to another player.
+
+- The hello answer's `capabilities` carry `save_integrity: true` and `clean_online_required`, the Worker variable
+  `CLEAN_ONLINE_REQUIRED` (`"true"`; anything else is off; `wrangler.toml` deploys `"false"`, the local server takes
+  `--clean-online-required`).
+- With it on, a `presence: true` hello is refused before any account row is written: `save_integrity_marked` for 1, 2 or
+  3, `save_integrity_unknown` without the field. Both count as rejects with that reason. A `presence: false` hello (the
+  Connection test) is never refused for it.
+- `/admin/api/summary` carries `live.integrity` (players online now per `clean`, `cheat`, `editor`, `both`, `unknown`) and
+  `clean_online_required`; `/admin/api/history` the `integrity` dimension, sessions started per category, one row write
+  per counted session beside the platform one. `/stats` has none of it.
+
+This only reads what official clients report; it is not anti-cheat.
+
 ### Early Story Online on the dashboard
 
 `/admin/api/summary` carries a `story` section; the game sends nothing for it. A room is a story room by the one test the
@@ -248,7 +267,7 @@ nothing else is collected (docs/ONLINE.md, Privacy and usage statistics).
 | Table | Row | Columns |
 |---|---|---|
 | `metrics_daily` | one per day | `sessions`, `rooms_created`, `room_joins`, `incompatible_rejects`, `peak_online`, `peak_in_rooms`, `peak_rooms`, `rooms_closed`, `rooms_with_guest`, `rooms_relayed`, `party_total` and the six platform room counters below |
-| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version` and `country`; `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `difficulty` (`normal`, `hard`, `infernal`, `ultimate`) counts ended rooms with a guest once each by the difficulty the host reported at `room.create` (raw 1 and 2 are `hard`, 3 and 4 `infernal`, 99 `ultimate`; a missing or unknown value adds no row, so the dashboard's unknown is the rooms with a guest minus these); `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
+| `metrics_daily_dimensions` | day, dimension, value | `count`: sessions started per `platform`, `version`, `country` and `integrity` (`clean`, `cheat`, `editor`, `both`, `unknown`); `reject` counts rejects by reason; `abuse` counts protection events; `occupancy` (`1` to `4`) and `lifetime` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_1h`) count ended rooms; `difficulty` (`normal`, `hard`, `infernal`, `ultimate`) counts ended rooms with a guest once each by the difficulty the host reported at `room.create` (raw 1 and 2 are `hard`, 3 and 4 `infernal`, 99 `ultimate`; a missing or unknown value adds no row, so the dashboard's unknown is the rooms with a guest minus these); `character`, `host_character`, `party_size`, `party_composition` and `party_duplicate` count party snapshots (below) |
 | `metrics_samples` | one per 15 minutes (UTC ms) | the highest `online`, `in_rooms` and `rooms` in the interval; 90 days kept |
 
 - Days are America/Sao_Paulo calendar days (`YYYY-MM-DD`); samples are UTC timestamps.

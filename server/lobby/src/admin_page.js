@@ -117,6 +117,12 @@ export const ADMIN_HTML = String.raw`<!doctype html>
       <p id="boss-top-note" class="muted"></p>
       <div class="scroll"><table id="boss-top"></table></div>
     </div>
+    <h2 class="section">Online Integrity</h2>
+    <div class="panel">
+      <p id="integrity-note" class="muted"></p>
+      <div class="cards" id="integrity-live"></div>
+      <div id="d-integrity"></div>
+    </div>
     <h2 class="section">Historical activity</h2>
     <div class="panel">
       <h2>Usage over time</h2>
@@ -548,7 +554,9 @@ export const ADMIN_JS = String.raw`(function () {
     relay_suspended: 'Relay suspended for a sender over its budget'
   };
   var REJECTS = { lobby_protocol: 'Sign-in refused: different lobby protocol', online_protocol: 'Room join refused: different online protocol',
-    story_session: 'Room join refused: client without story session support' };
+    story_session: 'Room join refused: client without story session support',
+    save_integrity_unknown: 'Sign-in refused: save integrity not reported (clean online required)',
+    save_integrity_marked: 'Sign-in refused: save used with gameplay cheats or Editor changes (clean online required)' };
 
   function readStored(key) {
     try { return sessionStorage.getItem(key) || ''; } catch (e) { return ''; }
@@ -1036,6 +1044,25 @@ export const ADMIN_JS = String.raw`(function () {
     table(node, ['Rank', 'Boss', 'Plays'], top.map(function (b) { return [String(b.rank), b.name, fmt(b.plays)]; }));
   }
 
+  var INTEGRITY = { clean: 'Clean', cheat: 'Cheat', editor: 'Editor', both: 'Both', unknown: 'Unknown' };
+
+  function integrity(summary, history) {
+    var live = $('integrity-live');
+    var range = $('d-integrity');
+    clear(live);
+    clear(range);
+    ordered(summary.live.integrity || [], INTEGRITY).forEach(function (i) {
+      live.appendChild(card(INTEGRITY[i.value] + ' now', fmt(i.count)));
+    });
+    $('integrity-note').textContent = 'Players online now by the save integrity their client reported at sign-in. Clean: no gameplay cheats ' +
+      'or gameplay Editor changes were recorded for the save. Cheat, Editor and Both: they were. Unknown: the client reported nothing ' +
+      '(an older version), which is never treated as clean. ' + (summary.clean_online_required
+      ? 'Clean online is required: only Clean sign-ins are accepted.' : 'Clean online is not required: every state is accepted and only observed.') +
+      ' This is a signal from official clients, not anti-cheat; nothing here names a player.';
+    rows(range, 'Sessions · last ' + history.days + ' days', ordered(history.dimensions.integrity || [], INTEGRITY),
+      function (v) { return INTEGRITY[v]; });
+  }
+
   function comms(data) {
     var totals = $('comms-totals');
     var note = $('comms-note');
@@ -1441,6 +1468,7 @@ export const ADMIN_JS = String.raw`(function () {
     parties(history);
     story(summary.story);
     boss(summary.boss);
+    integrity(summary, history);
     comms(summary.comms);
     health(history);
     usageChart($('usage'), history);

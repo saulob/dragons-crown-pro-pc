@@ -1291,6 +1291,19 @@ ONLINE LOBBY	LOBBY ONLINE
 INSTALL GAME	INSTALAR JOGO
 MANAGE GAME	GERENCIAR JOGO
 Live statistics unavailable	Estatísticas ao vivo indisponíveis
-Downloads come from GitHub releases. Multiplayer numbers are anonymous aggregate statistics from the online service.	Os downloads vêm das releases do GitHub. Os números do multiplayer são estatísticas agregadas e anônimas do serviço online.)PTBR";
+Downloads come from GitHub releases. Multiplayer numbers are anonymous aggregate statistics from the online service.	Os downloads vêm das releases do GitHub. Os números do multiplayer são estatísticas agregadas e anônimas do serviço online.
+Could not record the save's online integrity; nothing was applied.	Não foi possível registrar a integridade online do save; nada foi aplicado.
+Online integrity	Integridade online
+Integrity status unavailable	Status de integridade indisponível
+Clean save, eligible for clean shared online	Save limpo, apto para o online compartilhado limpo
+Gameplay cheats were previously used with this save	Trapaças de jogabilidade já foram usadas com este save
+Gameplay Editor changes were previously applied to this save	Alterações de jogabilidade do Editor já foram aplicadas a este save
+Gameplay cheats and Editor changes were previously used with this save	Trapaças de jogabilidade e alterações do Editor já foram usadas com este save
+Cheats and the Editor are meant for offline and local play. A save once used with gameplay cheats or gameplay Editor changes may not be accepted by a clean shared online server. Names, colors and custom appearances never mark a save.	As trapaças e o Editor são destinados ao jogo offline e local. Um save que já foi usado com trapaças de jogabilidade ou alterações de jogabilidade do Editor pode não ser aceito por um servidor online compartilhado limpo. Nomes, cores e aparências personalizadas nunca marcam um save.
+This online service accepts only saves never used with gameplay cheats or gameplay Editor changes. The Saves page shows the state of your save.	Este serviço online aceita apenas saves nunca usados com trapaças de jogabilidade ou alterações de jogabilidade do Editor. A página Saves mostra o estado do seu save.
+This online service accepts only saves whose integrity status is known, and it could not be read for your save. The Saves page shows the state of your save.	Este serviço online aceita apenas saves com status de integridade conhecido, e ele não pôde ser lido para o seu save. A página Saves mostra o estado do seu save.
+This online service accepts only clean saves.	Este serviço online aceita apenas saves limpos.
+Gameplay cheats or Editor changes were used with this save.	Trapaças de jogabilidade ou alterações do Editor foram usadas com este save.
+This game could not report the save's integrity status.	Este jogo não conseguiu informar o status de integridade do save.)PTBR";
 
 } // namespace dcp::localization

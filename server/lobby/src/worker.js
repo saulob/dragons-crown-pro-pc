@@ -71,7 +71,7 @@ export class LobbyObject extends DurableObject {
         now: () => Date.now(),
         setAlarm: (ms) => ctx.storage.setAlarm(ms),
         log: (text) => console.log(text),
-      }, { alarmAt: await ctx.storage.getAlarm() });
+      }, { alarmAt: await ctx.storage.getAlarm(), cleanOnlineRequired: env.CLEAN_ONLINE_REQUIRED === 'true' });
     });
   }
 

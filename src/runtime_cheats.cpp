@@ -25,6 +25,7 @@ std::atomic<int> g_available{0};
 std::atomic<bool> g_online{false};
 int (*g_slot_human)(int slot) = nullptr;
 void (*g_player_observer)(uint64_t unit) = nullptr;
+std::atomic<void (*)(void)> g_use_sink{nullptr};
 
 bool Valid(int cheat) {
     return cheat >= 0 && static_cast<size_t>(cheat) < dcp::cheats::kCheatCount;
@@ -172,6 +173,19 @@ extern "C" int runtime_cheat_enabled(int cheat) {
         return 0;
     }
     return g_session.Effective(static_cast<Cheat>(cheat), SavedValue(static_cast<Cheat>(cheat))) ? 1 : 0;
+}
+
+extern "C" void runtime_cheats_set_use_sink(void (*sink)(void)) {
+    g_use_sink.store(sink, std::memory_order_release);
+}
+
+extern "C" void runtime_cheat_used(void) {
+    if (OnlineSessionActive()) {
+        return;
+    }
+    if (void (*sink)(void) = g_use_sink.load(std::memory_order_acquire)) {
+        sink();
+    }
 }
 
 extern "C" void runtime_cheat_toggle(int cheat) {

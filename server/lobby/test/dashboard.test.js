@@ -589,3 +589,30 @@ test('difficulty older than the selected period is left out, and platform and ro
   }
   assert.ok(page.get('d-mix').textContent.includes('Windows + Android'));
 });
+
+const integrityCards = (page) => page.get('integrity-live').find((n) => n.hasClass('card')).map((c) => c.textContent);
+
+test('Online Integrity follows Boss Battle Online and shows Clean, Cheat, Editor, Both and Unknown', async () => {
+  const boss = ADMIN_HTML.indexOf('>Boss Battle Online<');
+  const section = ADMIN_HTML.indexOf('>Online Integrity<');
+  assert.ok(boss > 0 && boss < section && section < ADMIN_HTML.indexOf('>Historical activity<'));
+  const env = makeLobby();
+  for (const flags of [0, 0, 1, 2, 3, undefined]) {
+    const client = env.connect();
+    const fields = { online_protocol: 1, version: '1.5.1', platform: 'Windows' };
+    assert.equal(client.hello(flags === undefined ? fields : { ...fields, integrity_flags: flags }).code, 'ok');
+  }
+  const page = await dashboard(env, 30);
+  assert.deepEqual(integrityCards(page), ['Clean now2', 'Cheat now1', 'Editor now1', 'Both now1', 'Unknown now1']);
+  const sessions = page.get('d-integrity').textContent;
+  for (const label of ['Clean', 'Cheat', 'Editor', 'Both', 'Unknown']) assert.ok(sessions.includes(label), label);
+  assert.ok(page.get('integrity-note').textContent.includes('Clean online is not required'));
+  assert.ok(!/NaN|Infinity|undefined|\[object/.test(everyText(page)));
+});
+
+test('with nobody online every integrity state shows 0 and the session rows say No data yet', async () => {
+  const page = await dashboard(makeLobby({ cleanOnlineRequired: true }), 30);
+  assert.deepEqual(integrityCards(page), ['Clean now0', 'Cheat now0', 'Editor now0', 'Both now0', 'Unknown now0']);
+  assert.ok(page.get('d-integrity').textContent.includes('No data yet'));
+  assert.ok(page.get('integrity-note').textContent.includes('Clean online is required'));
+});

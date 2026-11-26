@@ -4,10 +4,10 @@ import { LocalConn, LocalHost, sqliteStore } from '../local/host.js';
 
 let accounts = 0;
 
-export function makeLobby({ local = false, log = (text) => { throw new Error(text); } } = {}) {
+export function makeLobby({ local = false, cleanOnlineRequired = false, log = (text) => { throw new Error(text); } } = {}) {
   const clock = { now: 1_700_000_000_000 };
   const host = new LocalHost(sqliteStore(), { now: () => clock.now, log });
-  const lobby = new Lobby(host, { local });
+  const lobby = new Lobby(host, { local, cleanOnlineRequired });
   return {
     lobby,
     host,
