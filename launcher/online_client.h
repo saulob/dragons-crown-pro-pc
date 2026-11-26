@@ -30,6 +30,7 @@ public:
         bool lobby_fetched = false;
         double lobby_updated_at = 0; // on the clock passed to Update, when lobby_fetched
         std::string lobby_problem;
+        std::string refusal; // the lobby's code when it refused the sign-in
     };
 
     static constexpr double kNameSettleSeconds = 1.5;
@@ -45,6 +46,8 @@ public:
 
     // Every launcher frame. Off stops the link; on keeps one, started again for another lobby, build or online name.
     void Update(bool on, const net::OnlineConfig& config, const std::string& game, double now);
+    // The installed game's title id: the hello reports the integrity of its saves (save_integrity.h).
+    void SetSaveTitle(std::string title_id) { title_ = std::move(title_id); }
 
     // The lists change at once; the lobby's answer and a fresh read follow.
     void AddFriend(const std::string& code);
@@ -78,6 +81,7 @@ private:
     std::filesystem::path user_dir_;
     std::unique_ptr<net::LobbyLink> link_;
     std::string url_, game_, name_;
+    std::string title_, started_title_;
     std::string wanted_name_;
     double name_since_ = 0;
     double retry_at_ = 0;

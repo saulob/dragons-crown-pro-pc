@@ -73,6 +73,11 @@ void runtime_cheat_observe_player(uint64_t unit);
 /* 1 when the cheat (a dcp::cheats::Cheat value) is on: the saved value, or the menu's override of it this session. */
 int runtime_cheat_enabled(int cheat);
 
+/* A cheat, a multiplier or an action has just changed gameplay. The hooks call it only where the game's value actually
+ * differs; the loader's sink marks the save (runtime_integrity.h). Nothing happens while Online Play locks cheats. */
+void runtime_cheat_used(void);
+void runtime_cheats_set_use_sink(void (*sink)(void));
+
 /* 1 once after a cheat that fills a resource (Infinite Mana, Durability) turned On, from the launcher's value at
  * the start or from the menu; the game thread asks when it holds a local human unit and fills it when this says 1. */
 int runtime_cheat_take_refill(int cheat);

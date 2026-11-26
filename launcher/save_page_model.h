@@ -34,6 +34,12 @@ enum class SaveFileStatus { kValid, kUnreadable, kWrongSize, kNotDragonsCrown, k
 SaveFileStatus ClassifySave(const SaveModel& model);
 const char* SaveStatusText(SaveFileStatus status); // English; drawn through Tr
 const char* CrcStatusText(SaveFileStatus status);
+// The Online integrity row for a save's flags (save_integrity.h); nullopt is unknown. English; drawn through Tr.
+const char* IntegrityStatusText(std::optional<uint32_t> flags);
+inline constexpr char kIntegrityHelp[] =
+    "Cheats and the Editor are meant for offline and local play. A save once used with gameplay cheats or gameplay "
+    "Editor changes may not be accepted by a clean shared online server. Names, colors and custom appearances never "
+    "mark a save.";
 
 struct SaveOverview {
     std::string platform;

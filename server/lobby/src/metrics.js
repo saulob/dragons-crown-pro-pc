@@ -12,7 +12,7 @@ export const SAMPLE_DAYS = 90;
 export const HISTORY_MAX_DAYS = 365;
 export const SHOWCASE_DAYS = 30;
 export const DIMENSIONS = ['platform', 'platform_mix', 'version', 'country', 'reject', 'abuse', 'occupancy', 'lifetime',
-  'difficulty', ...PARTY_DIMENSIONS];
+  'difficulty', 'integrity', ...PARTY_DIMENSIONS];
 export const LIFETIMES = [['under_1m', 60e3], ['1_5m', 5 * 60e3], ['5_15m', 15 * 60e3], ['15_60m', 60 * 60e3], ['over_1h', Infinity]];
 export const DIAGNOSTICS = new Set(['ws_upgrade_accepted', 'ws_upgrade_limited', 'ws_upgrade_ip_cap', 'hello_accepted',
   'hello_reconnect_deduped', 'hello_limited', 'room_create_accepted', 'room_create_limited', 'room_join_limited',
@@ -66,6 +66,11 @@ function daysBefore(day, n) {
 export const sampleBucket = (ms) => ms - (ms % SAMPLE_MS);
 
 export const platformCategory = (text) => (PLATFORMS.includes(text) ? text : 'Other');
+
+// A hello's integrity_flags (docs/ONLINE.md, Save integrity) as a category; a client that sent none is unknown.
+export const INTEGRITY = ['clean', 'cheat', 'editor', 'both'];
+export const integrityCategory = (flags) => (Number.isInteger(flags) && flags >= 0 && flags < INTEGRITY.length
+  ? INTEGRITY[flags] : 'unknown');
 
 // A room remembers which platform categories ever sat in it as bits in PLATFORM_ORDER; 0 means it was not tracked.
 export const platformBit = (platform) => 1 << PLATFORM_ORDER.indexOf(platformCategory(platform));
@@ -165,6 +170,7 @@ export class Metrics {
     this.addDimension(day, 'platform', platformCategory(client.platform));
     this.addDimension(day, 'version', versionCategory(client.version));
     this.addDimension(day, 'country', countryCode(client.country));
+    this.addDimension(day, 'integrity', integrityCategory(client.integrity_flags));
   }
 
   // One accepted party snapshot (party.js): bounded counts in the party dimensions, whose values the server derives from
@@ -220,7 +226,7 @@ export class Metrics {
     CLEANUP_ROWS);
   }
 
-  // `live`: the counts plus Maps of platform, version and country to connected players.
+  // `live`: the counts plus Maps of platform, version, country and integrity to connected players.
   summary(live) {
     const now = this.now();
     const day = metricsDay(now);
@@ -230,7 +236,7 @@ export class Metrics {
       time_zone: METRICS_TIME_ZONE,
       day,
       live: { online: live.online, in_rooms: live.in_rooms, rooms: live.rooms, platform: sorted(live.platform),
-        version: sorted(live.version), country: sorted(live.country) },
+        version: sorted(live.version), country: sorted(live.country), integrity: sorted(live.integrity ?? new Map()) },
       today: { ...today, peak_online: Math.max(today.peak_online, live.online),
         peak_in_rooms: Math.max(today.peak_in_rooms, live.in_rooms), peak_rooms: Math.max(today.peak_rooms, live.rooms) },
     };

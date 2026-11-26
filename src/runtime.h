@@ -128,6 +128,8 @@ int runtime_memory_prepare(void);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);
+/* The configured title id, or NULL before one is known. */
+const char *runtime_savedata_title(void);
 uintptr_t runtime_savedata_resolve(const char *name);
 void runtime_savedata_report(void);
 /* OrbisSaveDataParam (1328 bytes) of a save directory of the current title. */
@@ -139,6 +141,10 @@ int runtime_savedata_isolate(void);
 void runtime_savedata_release(void);
 int runtime_savedata_isolated(void);
 int runtime_savedata_protects(const char *host_path);
+/* The campaign save last mounted outside the Boss Battle copy: its generation (it changes with the save; 0 before any)
+ * and names. The marker is the same generation, lock-free, and 0 while isolated. */
+unsigned runtime_savedata_campaign(char *title, size_t title_size, char *dir, size_t dir_size);
+unsigned runtime_savedata_campaign_marker(void);
 void runtime_thread_attach_host(const char *name);
 /* Name of a guest thread handle, or NULL when it is not a live thread. */
 const char *runtime_thread_name(void *handle);

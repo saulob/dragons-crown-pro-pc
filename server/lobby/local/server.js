@@ -2,6 +2,7 @@
 // Development lobby: the Worker's lobby (src/lobby.js) over node:http and node:sqlite, without Cloudflare.
 //   node server/lobby/local/server.js [--host 127.0.0.1] [--port 8790] [--db <file>|:memory:] [--verbose]
 //                                     [--seed-friends <identity.ini> --seed-friends <identity.ini>] [--test-observed-address]
+//                                     [--clean-online-required]
 // Clients use ws://<host>:<port>/. Loopback clients are exempt from the per-address limits. With a --db file, accounts,
 // friend codes and friends survive restarts; rooms never do. With --test-observed-address a loopback client may connect to
 // /?observed=<address> and be treated as coming from it, which is how the tests stand in for a public network.
@@ -46,9 +47,9 @@ export function readIdentity(file, name) {
 }
 
 export function startLobbyServer({ host: address = '127.0.0.1', port = 8790, db = ':memory:', verbose = false,
-  seedFriends = [], testObservedAddress = false, log = () => {} } = {}) {
+  seedFriends = [], testObservedAddress = false, cleanOnlineRequired = false, log = () => {} } = {}) {
   const host = new LocalHost(sqliteStore(db), { log });
-  const lobby = new Lobby(host, { local: true });
+  const lobby = new Lobby(host, { local: true, cleanOnlineRequired });
   host.onAlarm = () => lobby.alarm();
   const ghosts = lobby.clearRooms();
   if (seedFriends.length === 2) {
@@ -149,6 +150,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       verbose: { type: 'boolean', default: false },
       'seed-friends': { type: 'string', multiple: true, default: [] },
       'test-observed-address': { type: 'boolean', default: false },
+      'clean-online-required': { type: 'boolean', default: false },
     },
   });
   const seeds = values['seed-friends'];
@@ -156,6 +158,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const stamp = () => new Date().toISOString().slice(11, 23);
   const log = (text) => console.log(`${stamp()} ${text}`);
   const started = await startLobbyServer({ host: values.host, port: Number(values.port), db: values.db,
-    verbose: values.verbose, testObservedAddress: values['test-observed-address'], seedFriends: seeds.map((file, i) => readIdentity(file, `Client${'AB'[i]}`)), log });
+    verbose: values.verbose, testObservedAddress: values['test-observed-address'],
+    cleanOnlineRequired: values['clean-online-required'], seedFriends: seeds.map((file, i) => readIdentity(file, `Client${'AB'[i]}`)), log });
   log(`dcp lobby on ws://${values.host}:${started.port}/ (database ${values.db}); Ctrl+C stops it`);
 }

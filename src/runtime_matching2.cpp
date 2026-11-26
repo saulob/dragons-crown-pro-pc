@@ -7,6 +7,7 @@
 // The game takes its own lock in every callback and holds it while calling Matching2, so callbacks are only ever made
 // from pump() (sceNpCheckCallback, once per frame) and never with our lock held.
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -607,12 +608,15 @@ void RoomGone(uint16_t event) {
     ClearRoom();
 }
 
+std::atomic<int (*)(void)> g_integrity_source{nullptr};
+
 Json HelloBody() {
     const Settings& s = settings();
     Json hello = net::hello_body(s.identity, s.name, s.game, true, true, s.config.lobby_visible);
     if (early_story_active()) hello.set("story_session", true);
     if (boss_battle_online_available()) hello.set("boss_battle_session", true);
     if (appearance_session_enabled()) hello.set("appearance", true);
+    if (int (*source)(void) = g_integrity_source.load(std::memory_order_acquire)) net::set_integrity_flags(hello, source());
     return hello;
 }
 
@@ -1110,6 +1114,13 @@ void OnLink(const net::LobbyMessage& m) {
         g.down = true;
         g.lost = false;
         std::printf("Matching2: lobby unavailable (%s)\n", m.code.c_str());
+        if (m.code == net::kSaveIntegrityMarked) {
+            g.notice = "This online service accepts only clean saves.\n"
+                       "Gameplay cheats or Editor changes were used with this save.";
+        } else if (m.code == net::kSaveIntegrityUnknown) {
+            g.notice = "This online service accepts only clean saves.\n"
+                       "This game could not report the save's integrity status.";
+        }
         for (auto& [seq, p] : g.pending) {
             if (p.kind == Kind::kBossBattle) boss_battle_online_published(p.boss_version, 0);
             Complete(p, kErrLobbyDown);
@@ -1805,3 +1816,7 @@ std::string take_notice() {
 }
 
 } // namespace dcp::online
+
+extern "C" void runtime_online_set_integrity_source(int (*flags)(void)) {
+    dcp::online::g_integrity_source.store(flags, std::memory_order_release);
+}

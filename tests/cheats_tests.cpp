@@ -4822,6 +4822,102 @@ void TestKrakenImages() {
 
 } // namespace
 
+int g_cheat_uses = 0;
+
+void CountCheatUse() {
+    ++g_cheat_uses;
+}
+
+// Online integrity (docs/ONLINE.md): runtime_cheat_used fires only where a cheat changed a game value.
+void TestCheatUseSignal() {
+    runtime_cheats_set_online(0);
+    runtime_cheats_set_use_sink(CountCheatUse);
+    FakeGame player1(true, 0);
+    const auto respawn = [&](int32_t lives) {
+        GuestRegs regs{};
+        regs.r13 = player1.Unit();
+        regs.rax = static_cast<uint32_t>(lives);
+        LivesHook(&regs);
+    };
+    const auto award = [](uint64_t gained) {
+        GuestRegs regs{};
+        regs.rax = gained;
+        ExperienceHook(&regs);
+    };
+    const GuestHook* shop = FindHook("gold shop");
+    alignas(16) static uint8_t save[kGoldOffset + 64];
+    const auto spend = [&](int32_t before, int32_t after) {
+        std::memcpy(save + kGoldOffset, &before, 4);
+        GuestRegs regs{};
+        regs.r12 = reinterpret_cast<uint64_t>(save);
+        regs.rcx = static_cast<uint32_t>(after);
+        shop->handler(&regs);
+    };
+    CHECK(shop != nullptr);
+
+    g_cheat_uses = 0;
+    runtime_cheats_start(Bit(Cheat::InfiniteLives) | Bit(Cheat::InfiniteGold), 5);
+    CHECK(g_cheat_uses == 0); // configured alone
+    award(0);
+    spend(500, 900); // earning is not protected
+    CHECK(g_cheat_uses == 0);
+    spend(500, 350);
+    CHECK(g_cheat_uses == 1);
+    award(100);
+    respawn(2);
+    CHECK(g_cheat_uses == 3);
+
+    runtime_cheats_start(0, 1);
+    g_cheat_uses = 0;
+    runtime_cheat_toggle(int(Cheat::InfiniteLives));
+    runtime_cheat_toggle(int(Cheat::InfiniteLives)); // On and Off again before anything happened
+    respawn(2);
+    award(100);
+    spend(500, 350);
+    CHECK(g_cheat_uses == 0);
+
+    SetGuestFunctions({FakeIsDead, FakeRefillFunction, FakeGoldContext, FakeGetGold, FakeAddGold});
+    const auto tick = [&] {
+        GuestRegs regs = TickRegs(player1);
+        PlayerTickHook(&regs);
+    };
+    tick(); // F10 merely open: no action requested
+    CHECK(g_cheat_uses == 0);
+    g_gold = {};
+    g_gold.gold = kGoldMaximum;
+    runtime_cheat_action(int(Action::AddGold));
+    tick(); // at the maximum nothing is added
+    CHECK(g_cheat_uses == 0);
+    g_gold = {};
+    g_gold.gold = 100;
+    runtime_cheat_action(int(Action::AddGold));
+    tick();
+    CHECK(g_gold.gold == 1100 && g_cheat_uses == 1);
+
+    // Online Play keeps every cheat off: nothing changes, nothing is signalled, not even a direct call.
+    runtime_cheats_set_online(1);
+    g_cheat_uses = 0;
+    runtime_cheats_start((1u << kCheatCount) - 1, 100, 4, 0, 100);
+    respawn(2);
+    award(100);
+    spend(500, 350);
+    runtime_cheat_action(int(Action::AddGold));
+    tick();
+    runtime_cheat_used();
+    CHECK(g_cheat_uses == 0 && runtime_cheats_online_locked() == 1);
+
+    runtime_cheats_set_online(0);
+    runtime_cheats_set_use_sink(nullptr);
+    SetGuestFunctions(GuestFunctions{});
+    runtime_cheats_start(0, 1);
+
+    const std::string loader = ReadSource("src/loader.c");
+    const size_t lock = loader.find("runtime_cheats_set_online(runtime_online_play_enabled());");
+    const size_t sink = loader.find("runtime_cheats_set_use_sink(runtime_integrity_cheat_used);");
+    CHECK(lock != std::string::npos && sink != std::string::npos && lock < sink);
+    CHECK(loader.find("runtime_online_set_integrity_source(runtime_integrity_hello_flags);") != std::string::npos);
+}
+
 int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--check-image") {
         return CheckImage(argv[2]);
@@ -4867,6 +4963,9 @@ int main(int argc, char** argv) {
     TestPartialInstall();
     TestNativeHooks();
     TestSkillUseSites();
+    const int before_integrity = g_failures;
+    TestCheatUseSignal();
+    std::printf("GROUP|online-integrity-cheat-use|%s\n", g_failures == before_integrity ? "PASS" : "FAIL");
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

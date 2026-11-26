@@ -92,6 +92,16 @@ const char* CrcStatusText(SaveFileStatus status) {
     }
 }
 
+const char* IntegrityStatusText(std::optional<uint32_t> flags) {
+    if (!flags) return "Integrity status unavailable";
+    switch (*flags) {
+    case 0: return "Clean save, eligible for clean shared online";
+    case 1: return "Gameplay cheats were previously used with this save";
+    case 2: return "Gameplay Editor changes were previously applied to this save";
+    default: return "Gameplay cheats and Editor changes were previously used with this save";
+    }
+}
+
 SaveOverview DescribeOverview(const DiscoveredSave& save) {
     SaveOverview overview;
     const TitleInfo* info = ProTitleInfo(save.title_id);

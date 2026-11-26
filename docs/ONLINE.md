@@ -366,7 +366,8 @@ Android rooms that **used relay**, meaning the relay carried at least one frame 
   maintainer sees it on the same private page, and merely turning the option on records nothing. The game sends nothing
   extra for it: it comes from the room requests the game already makes.
 - Gameplay traffic still goes directly between the players' PCs (P2P), except for a pair that cannot connect directly: the lobby forwards that pair's packets unread and unstored. Saves, character names, levels, equipment, gold,
-  progress, quests, Ping and FPS are not collected. Apart from the optional party snapshot below and
+  progress, quests, Ping and FPS are not collected; a sign-in's save integrity (Save integrity, below) is kept only as a
+  count per day for each of clean, cheat, editor, both and unknown. Apart from the optional party snapshot below and
   the host character's difficulty in the request that creates a room, kept only as a count per day, the game sends nothing
   extra for these statistics: they come from the sign-in and room requests it already makes.
 - A few totals are public (`GET /stats`, server/lobby/README.md): players online, in rooms and in the Lobby, open rooms, the
@@ -479,6 +480,51 @@ or file crosses the network.
   the game thread; a look built after the game created the unit shows from the next time the unit is created. Default
   weapons follow the saved-look rule: replaced only while the game would draw the default one. With Online Play on, the
   Fighter model with helmet copies is always served so another player's hidden helmet draws as it does locally.
+
+### Save integrity
+
+A save container (a title id and its savedata directory, such as `CUSA10454` / `SAVEDATA00`, the whole SAVE0.DAT with all
+of its DATA slots) carries one integrity bitmask, `integrity_flags`, so a shared online service can ask for clean saves:
+
+| Value | Meaning |
+|---|---|
+| `0` | Clean: the official client recorded neither bit for this save |
+| bit 0 (`1`) | Gameplay cheats took effect while this save was the mounted campaign save |
+| bit 1 (`2`) | A successful Editor Apply persisted a gameplay change to this save |
+| `3` | Both |
+
+Any nonzero value means the save is not eligible for a clean shared environment. A bit is never cleared: backups,
+restores, exports, imports (PS4, PS3), restarts and turning cheats Off keep it, and a clean save imported over a marked
+`SAVEDATA00` keeps that container's mark. There is no reset.
+
+- **File.** `user/online_integrity.dat`, written by the launcher and the game, never inside SAVE0.DAT: magic `DCPI`
+  (little-endian `0x49504344`), u32 version `1`, u32 record count, then per record, sorted by title id and directory,
+  `[u8 n][title id]`, `[u8 n][directory]` and a u32 bitmask with only bits 0 and 1 and never 0. Every write re-reads the
+  file, adds its bits and replaces it atomically. A file that cannot be read, is malformed or has another version is never
+  overwritten, and its state is unknown, never clean; a later format bumps the version.
+- **Editor.** Apply records bit 1 before anything is written, and only when the persisted bytes change outside a present
+  character's name, its reading copy and its native colour (`IsGameplayEdit`): level, skill points, HP, the six stats,
+  difficulty, Gold, every Inventory Editor change and any later field count. Names, native colours and custom appearances
+  (colours, hidden parts, randomize, reset, online sync; character_appearance.dat) never do. Opening the Editor, pending,
+  discarded or failed changes record nothing: a failed Apply puts the previous file back.
+- **Cheats.** Bit 0 is recorded the first time a cheat, a multiplier (Experience Multiplier,
+  Damage Multiplier, Damage Taken, Movement Speed) or an F10 action (Add Skill Points, Add Gold, Level Up, the health actions) actually changes
+  a game value, for the campaign save last mounted. A cheat that is On but never changes anything, or one turned On and Off
+  again, records nothing. Nothing is recorded before a campaign save was mounted, or while Boss Battle uses its isolated
+  copy (`boss_battle/savedata`). Online Play still turns every cheat off for the whole process.
+- **Earlier use.** Past cheat use cannot be reconstructed and is not guessed. Past Editor use is recorded only where
+  character_overrides.dat holds a stat override for a character the save still has (same slot, class and identity);
+  past Inventory Editor changes cannot be told from values the game makes and are not guessed.
+- **Hello.** The game sends `integrity_flags` for the campaign save it last mounted. Before one is mounted, and from the
+  launcher, it is the union of every container of the installed title. A state that cannot be read is left out. A hello
+  without the field is unknown, never clean.
+- **Lobby.** It accepts only an integer 0 to 3 (`bad_request`, `integrity_flags` otherwise), keeps it on the connection
+  and tells no other player. Its hello answer carries `capabilities.save_integrity: true` and
+  `capabilities.clean_online_required`. With clean online required, a `presence: true` hello is refused with
+  `save_integrity_marked` for 1, 2 or 3 and `save_integrity_unknown` without the field; `presence: false` (the Connection
+  test) still signs in and reads the capabilities.
+
+This is a signal from official clients, not anti-cheat: the client is open source and can be changed to send anything.
 
 ### Ping
 
@@ -607,12 +653,13 @@ lower-case hex.
 
 - Request `{"op": "...", "seq": n, ...}`; answer `{"re": n, "code": "ok" | <error>, ...}`; event `{"ev": "...", ...}`.
 - Errors: `bad_request`, `too_large`, `no_session` (no hello yet), `proto`, `unauthorized`, `not_owner`, `in_room`,
-  `not_found`, `closed`, `full`, `incompatible`, `limit`, `incident_hourly_limit`, `incident_daily_limit`, `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
+  `not_found`, `closed`, `full`, `incompatible`, `limit`, `incident_hourly_limit`, `incident_daily_limit`,
+  `save_integrity_unknown`, `save_integrity_marked` (hello, clean online required; see Save integrity), `internal`. The port maps `not_found`/`closed`/`full` to the three Matching2
   errors the game tells apart (0x80550d0f / 0x80550d15 / 0x80550d19) and the rest to 0x80550ca1.. (ours).
 
 | op | request | answer |
 |---|---|---|
-| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay), `story_session`, `boss_battle_session`, `appearance` (optional) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload, story_session, boss_battle_session, appearance, udp_endpoint}` (absent from an older lobby) |
+| `hello` | `proto` 1, `game`, `account`, `secret` (64 hex), `name`, `presence` (false: launcher session, not shown online), `online_protocol`, `version`, `platform`, `relay` (optional, true: this client can use the relay), `story_session`, `boss_battle_session`, `appearance` (optional), `integrity_flags` (optional, 0-3; missing is unknown) | `account`, `name`, `friend_code`, `ip` (as the lobby sees it), `time`, `capabilities: {relay_supported, relay_max_payload, story_session, boss_battle_session, appearance, udp_endpoint, save_integrity, clean_online_required}` (absent from an older lobby) |
 | `worlds` | | `worlds: [{world, rooms, members}]` |
 | `udp` | `port` (on the address the lobby sees), `lan: [{ip, port}]` (<= 4, LAN/loopback only), `endpoint: {ip, port}` (optional, the client's public IPv4 UDP endpoint when it is on another address; port >= 1024; only to a lobby with `udp_endpoint`), `public_ip` (clients up to 1.5.0 connected over IPv6: the address `port` is on) | `ip` (as the lobby sees it), and what peers dial: `port`, `public_ip` (when an endpoint was accepted) |
 | `room.create` | `world`, `slots` (1-4), `flags`, `ints: [[id, u32]]`, `bin_int`, `bin_ext`, `member_bin: [[id, hex]]`, optional `difficulty` (`normal`, `hard`, `infernal`, `ultimate`, `unknown`, or the raw game value; any other type is `bad_request`) | `room`, `me`, `appearances` (with `appearance` declared) |

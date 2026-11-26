@@ -152,7 +152,7 @@ if (WIN32)
 else()
     set(DCP_PLATFORM_SOURCES src/runtime_log_posix.c)
 endif()
-set(DCP_MAIN_SOURCES src/loader.c src/simulate_crash.c src/cheat_hooks.cpp src/kraken_fix.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/item_attack_cap.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
+set(DCP_MAIN_SOURCES src/loader.c src/simulate_crash.c src/cheat_hooks.cpp src/kraken_fix.c src/isa_emulate.c src/lzcnt_compat.c src/skip_offers.c src/item_attack_cap.c src/skip_intro.c src/menu_buttons.c src/startup_save_hook.c src/system_type_hook.c src/ultrawide_hooks.c src/voice_hooks.c src/party_hook.cpp src/runtime_cheats.cpp src/runtime_integrity.c src/discord_presence.cpp ${DCP_RUNTIME_SOURCES} ${DCP_PLATFORM_SOURCES})
 if (WIN32)
     add_executable(dragons_crown_pro WIN32 ${DCP_MAIN_SOURCES})
 else()
@@ -716,8 +716,10 @@ target_include_directories(dcp-title-layout-tests PRIVATE src)
 target_compile_definitions(dcp-title-layout-tests PRIVATE DCP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(dcp-title-layout-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
 
-# Focused tests of the save-data mounts and the Japanese startup save hook (tools/test.ps1); not part of the default build.
-add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c)
+# Focused tests of the save-data mounts, the Japanese startup save hook and the save the online integrity marks
+# (tools/test.ps1); not part of the default build.
+add_executable(dcp-savedata-tests EXCLUDE_FROM_ALL tests/savedata_tests.c src/guest_hook.c src/startup_save_hook.c
+    src/runtime_integrity.c)
 target_include_directories(dcp-savedata-tests PRIVATE src)
 target_compile_definitions(dcp-savedata-tests PRIVATE DCP_SAVEDATA_TEST_ROOT="${CMAKE_BINARY_DIR}/savedata-tests")
 target_compile_options(dcp-savedata-tests PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror -fno-omit-frame-pointer>)

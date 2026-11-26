@@ -429,7 +429,7 @@ public:
         LoadLauncherImage("home_background.png", home_art_image_);
         sponsor_icon_ = LoadSponsorIcon(host_);
         trophy_page_ = std::make_unique<TrophyPage>(host_, UserDir());
-        online_page_ = std::make_unique<OnlinePage>(UserDir());
+        online_page_ = std::make_unique<OnlinePage>(UserDir(), [this] { return std::string(build_ ? build_->title_id : ""); });
         editor_page_ = std::make_unique<EditorPage>(
             host_, UserDir(), [this] { return EditorGame{RootsOf(paths_), build_}; },
             [this] {

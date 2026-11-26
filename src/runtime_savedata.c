@@ -72,10 +72,13 @@ static uint64_t memory_size;
 static int32_t memory_user;
 static atomic_int isolated;
 static size_t mounts_done, memory_writes;
+static char campaign_title[16], campaign_dir[33];
+static atomic_uint campaign_generation;
 
 void runtime_savedata_configure(const char *title) {
     if (title && *title) snprintf(title_id,sizeof(title_id),"%s",title);
 }
+const char *runtime_savedata_title(void) { return strcmp(title_id,"UNKNOWN") ? title_id : NULL; }
 
 static int make_dirs(const char *path) {
     char buffer[700];
@@ -192,6 +195,26 @@ void runtime_savedata_release(void) {
     if (was) puts("Runtime: save data released: campaign saves writable again");
 }
 int runtime_savedata_isolated(void) { return atomic_load(&isolated); }
+/* Called with the lock held, for a mount outside the Boss Battle copy. */
+static void note_campaign(const char *title, const char *dir) {
+    if (!strcmp(campaign_title,title) && !strcmp(campaign_dir,dir)) return;
+    snprintf(campaign_title,sizeof(campaign_title),"%s",title);
+    snprintf(campaign_dir,sizeof(campaign_dir),"%s",dir);
+    atomic_fetch_add(&campaign_generation,1);
+}
+unsigned runtime_savedata_campaign(char *title, size_t title_size, char *dir, size_t dir_size) {
+    pthread_mutex_lock(&lock);
+    const unsigned generation=atomic_load(&campaign_generation);
+    if (generation) {
+        snprintf(title,title_size,"%s",campaign_title);
+        snprintf(dir,dir_size,"%s",campaign_dir);
+    }
+    pthread_mutex_unlock(&lock);
+    return generation;
+}
+unsigned runtime_savedata_campaign_marker(void) {
+    return atomic_load(&isolated) ? 0 : atomic_load(&campaign_generation);
+}
 /* 1 for a host path inside the campaign saves while they are isolated: nothing may write there. */
 int runtime_savedata_protects(const char *host_path) {
     if (!atomic_load(&isolated) || !host_path) return 0;
@@ -252,6 +275,7 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint64
     memcpy(result->point.data,point,strlen(point)+1);
     result->status=exists ? 0 : 1; /* CREATED */
     runtime_file_mount(result->point.data,host);
+    if (!atomic_load(&isolated)) note_campaign(title && *title ? title : title_id,dir->data);
     ++mounts_done;
     pthread_mutex_unlock(&lock);
     printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,

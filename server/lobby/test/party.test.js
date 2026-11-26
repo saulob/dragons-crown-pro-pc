@@ -308,7 +308,8 @@ test('a client that never sends party reports behaves exactly as before and adds
 test('the hello answer is unchanged: no capability announces party reports', () => {
   const env = makeLobby();
   const reply = env.connect().hello(GAME);
-  assert.deepEqual(reply.capabilities, { relay_supported: true, relay_max_payload: 1200, story_session: true, boss_battle_session: true, appearance: true, udp_endpoint: true });
+  assert.deepEqual(reply.capabilities, { relay_supported: true, relay_max_payload: 1200, story_session: true, boss_battle_session: true, appearance: true,
+    udp_endpoint: true, save_integrity: true, clean_online_required: false });
   assert.deepEqual(Object.keys(reply).sort(), ['account', 'capabilities', 'code', 'friend_code', 'ip', 'name', 're', 'time']);
 });
 
@@ -345,7 +346,7 @@ test('a client cannot name a dimension, a value or a composition', () => {
   }
   assert.equal(partyRows(env).length, 0);
   assert.equal(env.host.sql.all(`SELECT 1 FROM metrics_daily_dimensions WHERE dimension NOT IN
-    ('platform','version','country','reject','abuse','occupancy','lifetime')`).length, 0);
+    ('platform','version','country','integrity','reject','abuse','occupancy','lifetime')`).length, 0);
 });
 
 test('history covers the selected range only and names the first day anything was reported', () => {

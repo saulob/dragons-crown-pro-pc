@@ -65,6 +65,22 @@ bool udp_endpoint_capability(const Json& hello_reply) {
     return hello_reply["capabilities"]["udp_endpoint"].as_bool();
 }
 
+void set_integrity_flags(Json& hello, int flags) {
+    if (flags >= 0 && flags <= kIntegrityFlagsMax) hello.set("integrity_flags", int64_t(flags));
+}
+
+bool save_integrity_capability(const Json& hello_reply) {
+    return hello_reply["capabilities"]["save_integrity"].as_bool();
+}
+
+bool clean_online_required(const Json& hello_reply) {
+    return hello_reply["capabilities"]["clean_online_required"].as_bool();
+}
+
+bool save_integrity_refusal(const std::string& code) {
+    return code == kSaveIntegrityUnknown || code == kSaveIntegrityMarked;
+}
+
 LobbyLink::LobbyLink(Options options) : options_(std::move(options)) {}
 
 LobbyLink::~LobbyLink() { stop(); }

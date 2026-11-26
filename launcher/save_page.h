@@ -71,6 +71,7 @@ private:
     std::string installed_title_;
     std::string installed_label_;
     std::vector<DiscoveredSave> saves_;
+    std::optional<uint32_t> integrity_;
     std::vector<size_t> visible_;
     std::vector<BackupInfo> backups_;
     BackupListing listing_;

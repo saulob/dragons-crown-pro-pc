@@ -2,6 +2,7 @@
  * called through its export names, as the guest calls it. No game files, no window. */
 #include "runtime_savedata.c"
 #include "startup_save_hook.h"
+#include "runtime_integrity.h"
 #include <stdlib.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -29,6 +30,23 @@ uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *n
 #ifdef _WIN32
 int compat_remove_tree(const char *path) { (void)path; return 0; }
 #endif
+
+/* launcher/save_integrity.cpp, recorded instead of written. */
+static struct { int calls, fail; unsigned bits; char title[16], dir[33]; } marks;
+static char flags_asked[80];
+int dcp_save_integrity_mark(const char *user, const char *title, const char *dir, unsigned bits) {
+    (void)user;
+    ++marks.calls;
+    marks.bits = bits;
+    snprintf(marks.title, sizeof(marks.title), "%s", title);
+    snprintf(marks.dir, sizeof(marks.dir), "%s", dir);
+    return !marks.fail;
+}
+int dcp_save_integrity_flags(const char *user, const char *title, const char *dir) {
+    (void)user;
+    snprintf(flags_asked, sizeof(flags_asked), "%s/%s", title, dir ? dir : "*");
+    return 2;
+}
 
 typedef int32_t (ABI *InitializeFn)(const void *);
 typedef int32_t (ABI *TerminateFn)(void);
@@ -504,7 +522,53 @@ static void test_boss_battle_isolation_keeps_the_campaign_save(void) {
     end();
 }
 
+/* Online integrity: a cheat marks the campaign save last mounted, once per save; never before a campaign save was mounted,
+ * and never while Boss Battle uses its copy. Runs first: nothing has been mounted in this process yet. */
+static void test_cheat_use_marks_only_the_campaign_save(void) {
+    begin("integrity", "CUSA10209");
+    char title[16] = "", dir[33] = "";
+    MountResult mounted;
+    memset(&marks, 0, sizeof(marks));
+    CHECK(runtime_savedata_campaign(title, sizeof(title), dir, sizeof(dir)) == 0 && !runtime_savedata_campaign_marker());
+    runtime_integrity_cheat_used();
+    CHECK(marks.calls == 0);
+    CHECK(runtime_integrity_hello_flags() == 2 && !strcmp(flags_asked, "CUSA10209/*"));
+
+    CHECK(mount_save(1, "SAVEDATA00", GUEST_CREATE_MODE, &mounted) == 0);
+    const unsigned first = runtime_savedata_campaign(title, sizeof(title), dir, sizeof(dir));
+    CHECK(first && !strcmp(title, "CUSA10209") && !strcmp(dir, "SAVEDATA00") && runtime_savedata_campaign_marker() == first);
+    runtime_integrity_cheat_used();
+    runtime_integrity_cheat_used();
+    CHECK(marks.calls == 1 && marks.bits == 1 && !strcmp(marks.title, "CUSA10209") && !strcmp(marks.dir, "SAVEDATA00"));
+    CHECK(runtime_integrity_hello_flags() == 2 && !strcmp(flags_asked, "CUSA10209/SAVEDATA00"));
+    unmount_save(&mounted);
+
+    CHECK(runtime_savedata_isolate() && runtime_savedata_campaign_marker() == 0);
+    CHECK(mount_save(1, "SAVEDATA01", GUEST_CREATE_MODE, &mounted) == 0); /* a save made inside the Boss Battle copy */
+    runtime_integrity_cheat_used();
+    CHECK(marks.calls == 1);
+    CHECK(runtime_savedata_campaign(title, sizeof(title), dir, sizeof(dir)) == first && !strcmp(dir, "SAVEDATA00"));
+    CHECK(runtime_integrity_hello_flags() == 2 && !strcmp(flags_asked, "CUSA10209/SAVEDATA00"));
+    unmount_save(&mounted);
+    runtime_savedata_release();
+    runtime_integrity_cheat_used();
+    CHECK(marks.calls == 1 && runtime_savedata_campaign_marker() == first);
+
+    CHECK(mount_save(1, "SAVEDATA01", GUEST_CREATE_MODE, &mounted) == 0);
+    unmount_save(&mounted);
+    runtime_integrity_cheat_used();
+    CHECK(marks.calls == 2 && !strcmp(marks.dir, "SAVEDATA01"));
+
+    marks.fail = 1;
+    CHECK(mount_save(1, "SAVEDATA02", GUEST_CREATE_MODE, &mounted) == 0);
+    unmount_save(&mounted);
+    for (int i = 0; i < 6; ++i) runtime_integrity_cheat_used();
+    CHECK(marks.calls == 5); /* a file that cannot be written is tried a few times, not on every hit */
+    end();
+}
+
 int main(void) {
+    test_cheat_use_marks_only_the_campaign_save();
     test_missing_save_is_not_found_for_every_title();
     test_other_names_and_modes_are_not_found();
     test_guest_create_mount_then_existing_load();

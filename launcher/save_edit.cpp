@@ -127,16 +127,31 @@ bool RestoreOverrides(const std::filesystem::path& path, const std::optional<std
     return store.Parse(*previous) && store.Save();
 }
 
+// Only undoes the mark this Apply added: the Apply never happened.
+bool RestoreIntegrity(const std::filesystem::path& path, const std::optional<std::vector<uint8_t>>& previous) {
+    std::error_code ec;
+    if (!previous) {
+        std::filesystem::remove(path, ec);
+        return !std::filesystem::exists(path, ec);
+    }
+    SaveIntegrityStore store(path);
+    return store.Parse(*previous) && store.Save();
+}
+
 } // namespace
 
 ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& saved,
-                      const CharacterOverrideStore* override_working, CharacterOverrideStore* override_saved) {
+                      const CharacterOverrideStore* override_working, CharacterOverrideStore* override_saved,
+                      const IntegrityTarget* integrity) {
     ApplyOutcome outcome;
     const bool custom_dirty = !(working == saved);
     const bool override_dirty = override_working && override_saved && !(*override_working == *override_saved);
+    const bool gameplay = integrity && edit && edit->dirty() && IsGameplayEdit(edit->persisted(), edit->working());
     const std::optional<std::vector<uint8_t>> prev_custom = custom_dirty ? Snapshot(saved.path()) : std::nullopt;
     const std::optional<std::vector<uint8_t>> prev_override =
         override_dirty ? Snapshot(override_saved->path()) : std::nullopt;
+    const std::optional<std::vector<uint8_t>> prev_integrity =
+        gameplay ? Snapshot(SaveIntegrityStorePath(integrity->user_dir)) : std::nullopt;
     auto rollback = [&]() {
         bool ok = true;
         if (outcome.custom_written) {
@@ -147,11 +162,27 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
             ok &= RestoreOverrides(override_saved->path(), prev_override);
             outcome.override_written = false;
         }
+        if (outcome.integrity_marked) {
+            ok &= RestoreIntegrity(SaveIntegrityStorePath(integrity->user_dir), prev_integrity);
+            outcome.integrity_marked = false;
+        }
         outcome.rolled_back = ok;
     };
+    const auto undo = [&]() {
+        if (outcome.custom_written || outcome.override_written || outcome.integrity_marked) rollback();
+    };
+    if (gameplay) {
+        const MarkResult marked = MarkSaveIntegrity(integrity->user_dir, integrity->key, kIntegrityGameplayEditorUsed);
+        if (marked == MarkResult::kFailed) {
+            outcome.integrity_failed = true;
+            return outcome;
+        }
+        outcome.integrity_marked = marked == MarkResult::kMarked;
+    }
     if (custom_dirty) {
         if (!working.Save()) {
             outcome.custom_failed = true;
+            undo();
             return outcome;
         }
         outcome.custom_written = true;
@@ -159,7 +190,7 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
     if (override_dirty) {
         if (!override_working->Save()) {
             outcome.override_failed = true;
-            if (outcome.custom_written) rollback();
+            undo();
             return outcome;
         }
         outcome.override_written = true;
@@ -167,7 +198,7 @@ ApplyOutcome ApplyAll(SaveEdit* edit, const CustomStore& working, CustomStore& s
     if (edit && edit->dirty()) {
         outcome.save = edit->Apply();
         if (outcome.save != SaveEdit::Result::kApplied) {
-            if (outcome.custom_written || outcome.override_written) rollback();
+            undo();
             return outcome;
         }
     }

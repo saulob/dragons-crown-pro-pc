@@ -183,13 +183,16 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     const ApplyOutcome outcome =
         [&] {
             CharacterOverrideStore override_next = override_working_;
-            if (edit_ && override_saved_.error().empty()) {
-                if (const DiscoveredSave* save = SelectedSave())
-                    SyncCharacterOverrides(override_next, edit_->working(), edit_->persisted(), save->title_id,
-                                           save->dir_name);
+            const DiscoveredSave* save = SelectedSave();
+            if (edit_ && override_saved_.error().empty() && save) {
+                SyncCharacterOverrides(override_next, edit_->working(), edit_->persisted(), save->title_id,
+                                       save->dir_name);
             }
+            const std::optional<IntegrityTarget> integrity =
+                save ? std::optional<IntegrityTarget>(IntegrityTarget{user_dir_, {save->title_id, save->dir_name}})
+                     : std::nullopt;
             return ApplyAll(edit_ ? &*edit_ : nullptr, custom_working_, custom_saved_, &override_next,
-                            &override_saved_);
+                            &override_saved_, integrity ? &*integrity : nullptr);
         }();
     if (outcome.ok()) {
         typed_.Clear();
@@ -209,6 +212,10 @@ void EditorPage::ApplyChanges(trg::Ui& ui) {
     }
     if (outcome.override_failed) {
         ui.SetStatus(Tr("Could not write the character stats; nothing was applied."), 8.0);
+        return;
+    }
+    if (outcome.integrity_failed) {
+        ui.SetStatus(Tr("Could not record the save's online integrity; nothing was applied."), 8.0);
         return;
     }
     switch (outcome.save) {

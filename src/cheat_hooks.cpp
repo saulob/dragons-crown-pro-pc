@@ -161,7 +161,11 @@ void GUEST_HOOK_ABI GoldStoreHook(GuestRegs* regs) {
     }
     const int32_t before = HostMemory{}.S32(regs->*Base + kGoldOffset);
     const int32_t after = static_cast<int32_t>(regs->*Value);
-    regs->*Value = static_cast<uint32_t>(ProtectedGold(true, before, after));
+    const int32_t kept = ProtectedGold(true, before, after);
+    if (kept != after) {
+        runtime_cheat_used();
+    }
+    regs->*Value = static_cast<uint32_t>(kept);
 }
 
 // [rbp-0x15c] in the damage function: a hit with this field nonzero sends its HP change as a message instead of
@@ -183,6 +187,7 @@ void MultiplyHpLoss(const HostMemory& memory, uint64_t owner, uint64_t unit, Uni
     const int32_t before_hit = MultipliedHpBeforeHit(multiplier, kind, hp, amount, g_kraken_trace.HpFloor(memory, owner));
     if (before_hit != hp) {
         HostMemory::Store<int32_t>(unit + kUnitHpOffset, before_hit);
+        runtime_cheat_used();
     }
 }
 
@@ -267,6 +272,9 @@ void GUEST_HOOK_ABI LethalCheckHook(GuestRegs* regs) {
     if (unit != 0) {
         hit = DamageAboveFloor(hit, amount, memory.S32(unit + kUnitHpOffset), floor);
     }
+    if (hit != amount) {
+        runtime_cheat_used();
+    }
     regs->rax = static_cast<uint32_t>(hit);
 }
 
@@ -298,7 +306,11 @@ void GUEST_HOOK_ABI HealthDamageHook(GuestRegs* regs) {
         return;
     }
     const int32_t kept = FrozenHealthDelta(true, IsFrozen(memory, unit), amount);
-    regs->rcx = static_cast<uint32_t>(ScaledDamageTaken(taken, kind, kept));
+    const int32_t scaled = ScaledDamageTaken(taken, kind, kept);
+    if (scaled != amount) {
+        runtime_cheat_used();
+    }
+    regs->rcx = static_cast<uint32_t>(scaled);
 }
 
 // At the entry of UseMP (rdi = the caster's unit, ecx = the consume flag).
@@ -308,12 +320,16 @@ void GUEST_HOOK_ABI ManaCostHook(GuestRegs* regs) {
     if (!player && !ally) {
         return;
     }
-    uint32_t consume = static_cast<uint32_t>(regs->rcx) & 0xff;
+    const uint32_t requested = static_cast<uint32_t>(regs->rcx) & 0xff;
+    uint32_t consume = requested;
     if (player) {
         consume = ProtectedConsumeFlag(true, Classify(regs->rdi), consume);
     }
     if (ally) {
         consume = ProtectedAllyConsumeFlag(true, IsAlly(HostMemory{}, regs->rdi), consume);
+    }
+    if (consume != requested) {
+        runtime_cheat_used();
     }
     regs->rcx = consume;
 }
@@ -330,6 +346,7 @@ void GUEST_HOOK_ABI ManaDrainHook(GuestRegs* regs) {
                           (ally && SuppressesAllyManaDelta(true, IsAlly(HostMemory{}, regs->rdi), delta));
     if (suppress) {
         regs->skip = 1;
+        runtime_cheat_used();
     }
 }
 
@@ -343,7 +360,12 @@ void GUEST_HOOK_ABI ArrowHook(GuestRegs* regs) {
     if (!IsLocalHuman(kind) || !IsElf(memory, regs->rdi)) {
         return;
     }
-    regs->rsi = static_cast<uint32_t>(ProtectedArrowAmount(true, kind, true, static_cast<int32_t>(regs->rsi)));
+    const int32_t amount = static_cast<int32_t>(regs->rsi);
+    const int32_t kept = ProtectedArrowAmount(true, kind, true, amount);
+    if (kept != amount) {
+        runtime_cheat_used();
+    }
+    regs->rsi = static_cast<uint32_t>(kept);
 }
 
 // Before the return of the experience-gain function (rax = the experience this call gains, int64). The stage result
@@ -353,7 +375,12 @@ void GUEST_HOOK_ABI ExperienceHook(GuestRegs* regs) {
     if (multiplier == kExperienceMultiplierOff) {
         return;
     }
-    regs->rax = static_cast<uint64_t>(MultipliedExperience(multiplier, static_cast<int64_t>(regs->rax)));
+    const int64_t gained = static_cast<int64_t>(regs->rax);
+    const int64_t multiplied = MultipliedExperience(multiplier, gained);
+    if (multiplied != gained) {
+        runtime_cheat_used();
+    }
+    regs->rax = static_cast<uint64_t>(multiplied);
 }
 
 // In the pad-driven walk, once its speed multiplier is final (the unit is at [rbp-0x80], the float at [rbp-0x48]).
@@ -369,6 +396,7 @@ void GUEST_HOOK_ABI MovementHook(GuestRegs* regs) {
     const float scaled = ScaledWalkMultiplier(movement_speed, kind, multiplier);
     if (scaled != multiplier) {
         std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(multiplier_address)), &scaled, sizeof(scaled));
+        runtime_cheat_used();
     }
 }
 
@@ -378,7 +406,11 @@ void GUEST_HOOK_ABI LivesHook(GuestRegs* regs) {
         return;
     }
     const int32_t lives = static_cast<int32_t>(regs->rax);
-    regs->rax = static_cast<uint32_t>(ProtectedLivesInput(true, Classify(regs->r13), lives));
+    const int32_t kept = ProtectedLivesInput(true, Classify(regs->r13), lives);
+    if (kept != lives) {
+        runtime_cheat_used();
+    }
+    regs->rax = static_cast<uint32_t>(kept);
 }
 
 // In the endurance event handler, before its delta is tested (the unit it applies to is [rbp-0x308], the signed delta
@@ -402,6 +434,7 @@ void GUEST_HOOK_ABI DurabilityHook(GuestRegs* regs) {
     }
     if (kept != delta) {
         std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(delta_address)), &kept, sizeof(kept));
+        runtime_cheat_used();
     }
 }
 
@@ -416,6 +449,9 @@ void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs) {
     const int32_t index = static_cast<int32_t>(regs->r12);
     const bool human = index == kPlayerOneSlot || (index > kPlayerOneSlot && index <= kLastPartySlot && SlotHuman(index));
     const int32_t kept = ProtectedSkillPoints(true, human, before, after);
+    if (kept != after) {
+        runtime_cheat_used();
+    }
     regs->r13 = (regs->r13 & ~uint64_t{0xffff}) | static_cast<uint16_t>(kept);
 }
 
@@ -423,6 +459,7 @@ void GUEST_HOOK_ABI SkillPointsHook(GuestRegs* regs) {
 void GUEST_HOOK_ABI SkillUseHook(GuestRegs* regs) {
     if (KeepsSkillUse(HostMemory{}, regs->r12, regs->rdi)) {
         regs->skip = 1;
+        runtime_cheat_used();
     }
 }
 
@@ -433,6 +470,7 @@ void GUEST_HOOK_ABI SkillUseMirrorHook(GuestRegs* regs) {
     if (KeepsSkillUse(HostMemory{}, regs->r12, BagItem(regs->rdi, static_cast<uint32_t>(regs->rsi)))) {
         regs->rax = 0;
         regs->skip = 1;
+        runtime_cheat_used();
     }
 }
 
@@ -456,6 +494,7 @@ void GUEST_HOOK_ABI SkillItemWearHook(GuestRegs* regs) {
     if (PreservedSkillUse(skill_item ? player_skills : player_items, kind, uses) ||
         PreservedAllySkillUse(skill_item ? ally_skills : ally_items, is_ally, uses)) {
         regs->skip = 1;
+        runtime_cheat_used();
     }
 }
 
@@ -466,9 +505,13 @@ void GUEST_HOOK_ABI SkillBudgetHook(GuestRegs* regs) {
         return;
     }
     const int32_t available = HostMemory{}.S32(regs->rbp - 0x5c);
-    regs->r12 = static_cast<uint32_t>(SkillAllowance(true, static_cast<int32_t>(regs->r12),
-                                                     static_cast<int32_t>(regs->r14),
-                                                     static_cast<int32_t>(regs->r13), available));
+    const int32_t allowance = static_cast<int32_t>(regs->r12);
+    const int32_t raised = SkillAllowance(true, allowance, static_cast<int32_t>(regs->r14),
+                                          static_cast<int32_t>(regs->r13), available);
+    if (raised != allowance) {
+        runtime_cheat_used();
+    }
+    regs->r12 = static_cast<uint32_t>(raised);
 }
 
 void SetGuestFunctions(const GuestFunctions& functions) {
@@ -516,6 +559,7 @@ bool ApplyDurabilityRefill(uint64_t unit) {
         const int32_t maximum = memory.S32(item + kItemMaxDurabilityOffset);
         if (NeedsDurabilityRefill(memory.U32(item + kItemFlagsOffset), memory.S32(item + kItemDurabilityOffset), maximum)) {
             g_guest.set_durability(list, static_cast<int32_t>(slot), maximum);
+            runtime_cheat_used();
         }
     }
     return true;
@@ -574,6 +618,7 @@ void HoldFrozenHealth(uint64_t unit) {
     const int32_t held = g_frozen.Hold(slot, unit, hp, NowMs());
     if (held != hp && hp > 0 && UnitAlive(memory, unit)) {
         HostMemory::Store<int32_t>(unit + kUnitHpOffset, held);
+        runtime_cheat_used();
     }
 }
 
@@ -586,6 +631,7 @@ void ApplyHealthAction(uint64_t unit, bool low) {
     g_applying_health_action = true;
     g_guest.refill(unit, 1, 0, 1);
     g_applying_health_action = false;
+    runtime_cheat_used();
     int32_t hp = memory.S32(unit + kUnitHpOffset);
     if (low) {
         hp = LowHealth(hp);
@@ -655,6 +701,7 @@ void ApplyAddGold(uint64_t unit) {
     const int32_t increase = GoldIncrease(before);
     if (increase > 0) {
         g_guest.add_gold(context, increase);
+        runtime_cheat_used();
     }
     std::printf("Cheats: Add 1,000 Gold, %d -> %d\n", before, g_guest.get_gold(context));
 }
@@ -675,6 +722,7 @@ void ApplyAddSkillPoints(uint64_t unit) {
         std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(record + kSkillPointsOffset)), &value, sizeof(value));
         std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(unit + kSkillPointsMirrorOffset)), &value,
                     sizeof(value));
+        runtime_cheat_used();
     }
     std::printf("Cheats: Add 100 Skill Points, %d -> %d\n", before, after);
 }
@@ -718,6 +766,7 @@ void ApplyAddLevel(uint64_t unit) {
     HostMemory::Store<int32_t>(record + kRecordXpPoolOffset, pool);
     HostMemory::Store<int32_t>(record + kRecordXpProgressOffset, 0);
     g_guest.set_level(record, static_cast<uint32_t>(next_level));
+    runtime_cheat_used();
 
     int32_t skill_points = static_cast<int16_t>(memory.Load<uint16_t>(record + kSkillPointsOffset));
     if (SkillPointsForLevel(next_level) != 0 && skill_points < kSkillPointsMaximum) {
@@ -749,6 +798,7 @@ void HoldArrows(uint64_t unit) {
     const int32_t held = HeldArrowCount(true, UnitKind::HumanPlayer, IsElf(memory, owner), count);
     if (held != count) {
         std::memcpy(reinterpret_cast<void*>(static_cast<uintptr_t>(owner + kArrowCountOffset)), &held, sizeof(held));
+        runtime_cheat_used();
     }
 }
 

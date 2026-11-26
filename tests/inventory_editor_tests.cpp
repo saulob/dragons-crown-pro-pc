@@ -35,6 +35,7 @@
 #include "save_data.h"
 #include "save_discovery.h"
 #include "save_edit.h"
+#include "save_integrity.h"
 #include "utf8.h"
 #include "trg/layout.h"
 
@@ -444,6 +445,35 @@ void TestAttack() {
     CHECK(ReadItem(written, ref).attack_min == 230 && ReadItem(written, ref).attack_max == 240);
     std::error_code ec;
     fs::remove_all(user, ec);
+}
+
+// Online integrity: every Inventory Editor field is a gameplay change, and an applied one marks the save container.
+void TestInventoryMarksIntegrity(const fs::path& base) {
+    Bytes bytes = MakeInventorySave();
+    const ItemRef ref{0, -1, 0, 41};
+    PutItem(bytes, ref, {283, {{0x12, 40}}, 100000, 100000, 0, 1, 5, 5, 0});
+    Seal(bytes);
+    const SaveModel before = SaveModel::FromBytes(bytes);
+    const auto gameplay = [&](auto edit) {
+        SaveModel after = before;
+        CHECK(edit(after));
+        return IsGameplayEdit(before, after);
+    };
+    CHECK(gameplay([&](SaveModel& m) { return SetItemDurability(m, ref, 5); }));
+    CHECK(gameplay([&](SaveModel& m) { return EditItemAttackMax(m, ref, 255); }));
+    CHECK(gameplay([&](SaveModel& m) { return EditItemAttackMin(m, ref, 1); }));
+    CHECK(gameplay([&](SaveModel& m) { return SetItemRequiredLevel(m, ref, 3); }));
+    CHECK(gameplay([&](SaveModel& m) { return SetModifierValue(m, ref, 0, 41.0f); }));
+
+    const fs::path user = base / "integrity";
+    WriteSave(user, bytes);
+    CustomStore custom(CustomStorePath(user));
+    const IntegrityTarget target{user, {"CUSA10454", "SAVEDATA00"}};
+    SaveEdit edit = OpenEdit(user);
+    CHECK(SetItemDurability(edit.working(), ref, 5));
+    const ApplyOutcome outcome = ApplyAll(&edit, custom, custom, nullptr, nullptr, &target);
+    SaveIntegrityStore store(SaveIntegrityStorePath(user));
+    CHECK(outcome.ok() && outcome.integrity_marked && store.Load() && store.Flags(target.key) == kIntegrityGameplayEditorUsed);
 }
 
 void TestHp(const fs::path& base) {
@@ -4355,7 +4385,7 @@ int main(int argc, char** argv) {
         {"inventory-localization", [&] { TestPortugueseNames(source); TestPortugueseFallbacks(source); TestLauncherLanguageCatalogs(source); TestMalformedSheetRecords(base); TestPortugueseSearchAndSort(); }},
         {"inventory-edit", [] { TestDurabilityMath(); TestEditDurability(); TestDurabilityBound(); TestMaxDurability(); TestSliderEditing(); TestAttackAndLevelIndependent(); TestSorting(); TestQuery(); TestClassCompatibility(); TestAttack(); TestScrollReset(); TestNames(); TestModifierEdit(); TestModifierNames(); TestEditLevel(); TestIsolation(); TestDetail(); }},
         {"inventory-safety", [] { TestMalformed(); TestUnknownPreserved(); TestValidateChanges(); TestMutations(); }},
-        {"inventory-transaction", [&] { TestTransaction(base); TestFailures(base); TestNavigationAndSwitching(base); TestHp(base); TestHpScope(base); TestDuplicateIdentity(base); TestSavePaths(base, source); TestItemsEntries(); TestGameLimits(); TestDuplicateMaxed(base); TestEffectiveLimits(base); TestRenameKeepsRow(base); TestSearchKeptAfterSave(base); TestInputPaths(base); TestTypedCommit(); TestFieldIsolation(base); TestEditedState(base); TestTypedTransactions(base); TestModifierDisplay(); TestModifierFullRange(); TestDexRecords(); TestListedModifiers(base); TestRequiredLevelRoundTrip(base); TestModifierSlots(base); }},
+        {"inventory-transaction", [&] { TestTransaction(base); TestFailures(base); TestNavigationAndSwitching(base); TestHp(base); TestHpScope(base); TestDuplicateIdentity(base); TestSavePaths(base, source); TestItemsEntries(); TestGameLimits(); TestDuplicateMaxed(base); TestEffectiveLimits(base); TestRenameKeepsRow(base); TestSearchKeptAfterSave(base); TestInputPaths(base); TestTypedCommit(); TestFieldIsolation(base); TestEditedState(base); TestTypedTransactions(base); TestModifierDisplay(); TestModifierFullRange(); TestDexRecords(); TestListedModifiers(base); TestRequiredLevelRoundTrip(base); TestModifierSlots(base); TestInventoryMarksIntegrity(base); }},
         {"inventory-ui", [&] { TestLayoutAndSource(source); }},
         {"inventory-icons", [&] { TestIconMapping(); TestItemLook(); TestAccessoryIcon(); TestRank(); TestRealIcons(source); }},
         {"inventory-real-saves", [&] { if (!quick) TestRealSaves(source, base); }},

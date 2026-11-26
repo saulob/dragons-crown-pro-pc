@@ -36,7 +36,7 @@ add_library(dcp_launcher_core STATIC atlas_signatures.cpp boot_image.cpp build_d
     feature_sites.cpp game_install.cpp game_patches.cpp game_process.cpp game_profile.cpp game_translation.cpp header_art.cpp home_art.cpp home_community.cpp home_portraits.cpp home_stats.cpp incident_report.cpp latin_font.cpp cyrillic_font.cpp hangul_font.cpp ${PROJECT_SOURCE_DIR}/src/latin_glyphs.c ${PROJECT_SOURCE_DIR}/src/cyrillic_glyphs.c ${PROJECT_SOURCE_DIR}/src/hangul_glyphs.c log_scrubber.cpp report_history.cpp online_client.cpp online_settings.cpp online_view.cpp voice_language_resources.cpp options.cpp page_icons.cpp paths.cpp pkg_extract.cpp resolution.c resolution_probe.c settings.cpp text_languages.cpp trophy_content.cpp
     save_edit.cpp save_backup.cpp save_data.cpp inventory_data.cpp modifier_values.cpp item_catalog.cpp inventory_model.cpp save_discovery.cpp save_import.cpp save_page_model.cpp save_sfo.cpp save_zip.cpp save_ps3.cpp save_ps3_layout.cpp crypto_hmac.cpp game_texture.cpp game_mbs.cpp
     sprite_render.cpp character_art.cpp editor_model.cpp appearance_custom.cpp appearance_runtime.cpp appearance_loader.cpp fighter_horns.cpp fighter_bare_head.cpp
-    hp_override.cpp hp_override_runtime.cpp
+    hp_override.cpp hp_override_runtime.cpp save_integrity.cpp
     appearance_remote.cpp ${PROJECT_SOURCE_DIR}/src/appearance_net.cpp updater/json.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_data.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_key.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_pack.cpp
     ${PROJECT_SOURCE_DIR}/src/trophies/trophy_runtime.cpp ${PROJECT_SOURCE_DIR}/src/trophies/trophy_service.cpp
@@ -353,6 +353,12 @@ target_link_libraries(dcp-appearance-online-tests PRIVATE dcp_launcher_core)
 target_compile_definitions(dcp-appearance-online-tests PRIVATE DCP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 set_target_properties(dcp-appearance-online-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 target_compile_options(dcp-appearance-online-tests PRIVATE -Wall -Wextra)
+
+# K7M4Q: the online save integrity record, the Editor classification and the character_overrides.dat backfill.
+add_executable(dcp-save-integrity-tests EXCLUDE_FROM_ALL ../tests/save_integrity_tests.cpp)
+target_link_libraries(dcp-save-integrity-tests PRIVATE dcp_launcher_core)
+set_target_properties(dcp-save-integrity-tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(dcp-save-integrity-tests PRIVATE -Wall -Wextra)
 
 # F3K8S: persistent per-character stat overrides, native fallback per field, and real build hooks.
 add_executable(dcp-character-override-tests EXCLUDE_FROM_ALL ../tests/character_override_tests.cpp)

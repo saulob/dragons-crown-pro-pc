@@ -13,6 +13,7 @@
 #include "loading_view.h"
 #include "localization/ui_text.h"
 #include "page_margin.h"
+#include "save_integrity.h"
 #include "trg/launcher.h"
 #include "utf8.h"
 
@@ -137,7 +138,9 @@ void SavePage::Select(int index) {
     pending_export_.reset();
     pending_import_.reset();
     pending_backup_.reset();
-    if (const DiscoveredSave* save = Selected()) selection_.save0 = save->save0_path;
+    const DiscoveredSave* save = Selected();
+    if (save) selection_.save0 = save->save0_path;
+    integrity_ = save ? SaveIntegrityFlags(user_dir_, saves_, save->title_id, save->dir_name) : std::nullopt;
     RebuildBackups();
 }
 
@@ -225,6 +228,8 @@ void SavePage::DrawOverview(trg::Ui& ui, const DiscoveredSave& save) {
                  {"Characters", std::to_string(overview.characters)},
                  {"Modified", overview.modified},
                  {"File size", overview.size}});
+    ui.Info("Online integrity", Tr(IntegrityStatusText(integrity_)));
+    ui.Help(kIntegrityHelp);
 }
 
 void SavePage::DrawSlots(trg::Ui& ui, const DiscoveredSave& save) {
